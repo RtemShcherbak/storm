@@ -1,4 +1,5 @@
 import { defaultStormConfig, loadStormConfig, saveStormConfig } from "./config.js";
+import { promptStormLmModels } from "./lm-config.js";
 
 function normalizeCommandContext(ctx) {
   if (!ctx || !ctx.ui) {
@@ -54,7 +55,9 @@ export async function runStormConfigCommand(ctx, options = {}) {
     doPolishArticle: await promptToggle(commandContext, "Enable polish stage", base.stageFlags.doPolishArticle),
   };
 
-  const saved = await saveStormConfig({ stageFlags, runtime }, agentDir);
+  const lmModels = await promptStormLmModels(commandContext, base.lmModels);
+
+  const saved = await saveStormConfig({ lmModels, stageFlags, runtime }, agentDir);
   commandContext.ui.notify("Saved /storm-config", "info");
   return saved;
 }
