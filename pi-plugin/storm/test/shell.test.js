@@ -48,7 +48,7 @@ function hasNotification(ctx, fragment) {
 }
 
 const pi = new FakePi();
-stormExtension(pi);
+await stormExtension(pi);
 
 for (const commandName of STORM_COMMANDS) {
   check(`registers /${commandName}`, pi.commands.has(commandName));
@@ -64,6 +64,7 @@ check(
 );
 
 for (const commandName of STORM_COMMANDS) {
+  if (commandName === "storm-config") continue;
   const ctx = new FakeCommandContext();
   await pi.commands.get(commandName)?.handler("", ctx);
   check(`/${commandName} reports placeholder availability`, hasNotification(ctx, "not available yet"));
