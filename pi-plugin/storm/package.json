@@ -1,0 +1,23 @@
+{
+  "name": "@rtemshcherbak/pi-storm",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Pi extension shell for Managed STORM runs.",
+  "keywords": [
+    "pi-package",
+    "pi-extension",
+    "storm"
+  ],
+  "pi": {
+    "extensions": [
+      "./src/index.js"
+    ]
+  },
+  "scripts": {
+    "test": "node test/shell.test.js"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
