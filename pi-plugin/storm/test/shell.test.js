@@ -63,8 +63,7 @@ check(
   sessionCtx.ui.statuses.get(STORM_STATUS_KEY) === NO_ACTIVE_RUN_STATUS,
 );
 
-for (const commandName of STORM_COMMANDS) {
-  if (commandName === "storm-config" || commandName === "storm-start" || commandName === "storm-resume") continue;
+for (const commandName of ["storm-cancel", "storm-artifacts"]) {
   const ctx = new FakeCommandContext();
   await pi.commands.get(commandName)?.handler("", ctx);
   check(`/${commandName} reports placeholder availability`, hasNotification(ctx, "not available yet"));

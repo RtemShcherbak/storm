@@ -15,7 +15,7 @@
     ]
   },
   "scripts": {
-    "test": "node test/shell.test.js && node test/config.test.js && node test/artifacts.test.js && node test/runs.test.js"
+    "test": "node test/shell.test.js && node test/config.test.js && node test/artifacts.test.js && node test/runs.test.js && node test/lifecycle.test.js && node test/lifecycle-extension.test.js"
   },
   "engines": {
     "node": ">=20"

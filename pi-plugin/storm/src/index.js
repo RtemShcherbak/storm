@@ -17,7 +17,7 @@ const COMMAND_DESCRIPTIONS = Object.freeze({
   "storm-start": "Create a new run-owned STORM artifact directory.",
   "storm-resume": "Select or resume an existing STORM artifact directory.",
   "storm-cancel": "Cancel the active Managed STORM run (placeholder).",
-  "storm-status": "Show Managed STORM run status (placeholder).",
+  "storm-status": "Show Managed STORM run status.",
   "storm-artifacts": "View Managed STORM run artifacts (placeholder).",
 });
 
@@ -29,9 +29,16 @@ function notifyPlaceholder(ctx) {
   ctx.ui.notify(PLACEHOLDER_MESSAGE, "info");
 }
 
+function setLifecycleStatus(ctx, lifecycle) {
+  const status = lifecycle.statusText();
+  ctx.ui.setStatus(STORM_STATUS_KEY, status === "not_started" ? NO_ACTIVE_RUN_STATUS : `○ STORM: ${status}`);
+}
+
 export default async function stormExtension(pi) {
+  const { createStormRunLifecycle } = await import("./lifecycle.js");
   const { runStormConfigCommand } = await import("./storm-config.js");
   const { runStormResumeCommand, runStormStartCommand } = await import("./runs.js");
+  const lifecycle = createStormRunLifecycle();
 
   pi.registerCommand("storm-config", {
     description: COMMAND_DESCRIPTIONS["storm-config"],
@@ -44,8 +51,14 @@ export default async function stormExtension(pi) {
   pi.registerCommand("storm-start", {
     description: COMMAND_DESCRIPTIONS["storm-start"],
     handler: async (args, ctx) => {
-      setNoActiveRunStatus(ctx);
-      await runStormStartCommand(ctx, args);
+      if (lifecycle.isActive()) {
+        ctx.ui.notify(`Cannot start a second STORM run while one is active: ${lifecycle.snapshot().runDir}`, "error");
+        return null;
+      }
+      const runDir = await runStormStartCommand(ctx, args);
+      lifecycle.start(runDir, "research");
+      setLifecycleStatus(ctx, lifecycle);
+      return runDir;
     },
   });
 
@@ -53,12 +66,21 @@ export default async function stormExtension(pi) {
     description: COMMAND_DESCRIPTIONS["storm-resume"],
     handler: async (args, ctx) => {
       setNoActiveRunStatus(ctx);
-      await runStormResumeCommand(ctx, args);
+      return await runStormResumeCommand(ctx, args);
+    },
+  });
+
+  pi.registerCommand("storm-status", {
+    description: COMMAND_DESCRIPTIONS["storm-status"],
+    handler: async (_args, ctx) => {
+      setLifecycleStatus(ctx, lifecycle);
+      ctx.ui.notify(`STORM status: ${lifecycle.statusText()}`, "info");
+      return lifecycle.snapshot();
     },
   });
 
   for (const commandName of STORM_COMMANDS) {
-    if (commandName === "storm-config" || commandName === "storm-start" || commandName === "storm-resume") continue;
+    if (commandName === "storm-config" || commandName === "storm-start" || commandName === "storm-resume" || commandName === "storm-status") continue;
     pi.registerCommand(commandName, {
       description: COMMAND_DESCRIPTIONS[commandName],
       handler: async (_args, ctx) => {
