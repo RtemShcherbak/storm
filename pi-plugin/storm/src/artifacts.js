@@ -7,6 +7,7 @@ export const STORM_POST_RUN_STAGE = "postRun";
 export const STORM_CANONICAL_ARTIFACTS = Object.freeze([
   "conversation_log.json",
   "raw_search_results.json",
+  "direct_gen_outline.txt",
   "storm_gen_outline.txt",
   "storm_gen_article.txt",
   "url_to_info.json",
@@ -17,10 +18,17 @@ export const STORM_CANONICAL_ARTIFACTS = Object.freeze([
 
 const STAGE_ARTIFACTS = Object.freeze({
   research: Object.freeze(["conversation_log.json", "raw_search_results.json"]),
-  outline: Object.freeze(["storm_gen_outline.txt"]),
+  outline: Object.freeze(["storm_gen_outline.txt", "direct_gen_outline.txt"]),
   article: Object.freeze(["storm_gen_article.txt", "url_to_info.json"]),
   polish: Object.freeze(["storm_gen_article_polished.txt"]),
   postRun: Object.freeze(["run_config.json", "llm_call_history.jsonl"]),
+});
+
+const PRIMARY_STAGE_ARTIFACT = Object.freeze({
+  research: "conversation_log.json",
+  outline: "storm_gen_outline.txt",
+  article: "storm_gen_article.txt",
+  polish: "storm_gen_article_polished.txt",
 });
 
 function pathFor(runDir, name) {
@@ -107,7 +115,7 @@ export async function inspectStormArtifacts(runDir) {
                 ? "outline"
                 : "research artifacts",
         paths: stages[primaryStage].artifacts.map((artifact) => artifact.path),
-        path: stages[primaryStage].artifacts[0]?.path ?? null,
+        path: canonicalArtifacts.find((artifact) => artifact.name === PRIMARY_STAGE_ARTIFACT[primaryStage])?.path ?? null,
       }
     : null;
 

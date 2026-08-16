@@ -19,6 +19,7 @@ const runDir = mkdtempSync(join(tmpdir(), "storm-artifacts-test-"));
 try {
   touch(join(runDir, "conversation_log.json"));
   touch(join(runDir, "raw_search_results.json"));
+  touch(join(runDir, "direct_gen_outline.txt"));
   touch(join(runDir, "storm_gen_outline.txt"));
   touch(join(runDir, "storm_gen_article.txt"));
   touch(join(runDir, "url_to_info.json"));
@@ -46,6 +47,7 @@ try {
   try {
     touch(join(noPolishDir, "conversation_log.json"));
     touch(join(noPolishDir, "raw_search_results.json"));
+    touch(join(noPolishDir, "direct_gen_outline.txt"));
     touch(join(noPolishDir, "storm_gen_outline.txt"));
     touch(join(noPolishDir, "storm_gen_article.txt"));
     touch(join(noPolishDir, "url_to_info.json"));
