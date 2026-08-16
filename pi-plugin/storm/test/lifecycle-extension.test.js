@@ -1,12 +1,30 @@
+import { EventEmitter } from "node:events";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { saveStormConfig } from "../src/config.js";
 import stormExtension from "../src/index.js";
+import { setStormProcessSpawnerForTesting } from "../src/process.js";
 
 function check(name, condition) {
   if (!condition) throw new Error(`FAILED: ${name}`);
   console.log(`✓ ${name}`);
+}
+
+class FakeChildProcess extends EventEmitter {
+  constructor() {
+    super();
+    this.stdout = new EventEmitter();
+    this.stderr = new EventEmitter();
+  }
+
+  emitSpawn() {
+    this.emit("spawn");
+  }
+
+  emitClose(code, signal = null) {
+    this.emit("close", code, signal);
+  }
 }
 
 class FakeUi {
@@ -46,6 +64,8 @@ class FakePi {
 const agentDir = mkdtempSync(join(tmpdir(), "storm-lifecycle-agent-"));
 const outputRoot = mkdtempSync(join(tmpdir(), "storm-lifecycle-output-"));
 const previousAgentDir = process.env.PI_AGENT_DIR;
+const fakeChild = new FakeChildProcess();
+setStormProcessSpawnerForTesting(() => fakeChild);
 process.env.PI_AGENT_DIR = agentDir;
 try {
   await saveStormConfig({ runtime: { outputRoot } }, agentDir);
@@ -73,7 +93,14 @@ try {
   check("second active start notifies conflict", blockedCtx.ui.notifications.some((n) => n.message.includes("one is active")));
   const statusAfterBlock = await pi.commands.get("storm-status")?.handler("", { ui: new FakeUi() });
   check("blocked second start leaves lifecycle running", statusAfterBlock.status === "running" && statusAfterBlock.phase === "research");
+
+  fakeChild.emitSpawn();
+  fakeChild.emitClose(0);
+  await Promise.resolve();
+  const completedStatus = await pi.commands.get("storm-status")?.handler("", { ui: new FakeUi() });
+  check("successful process exit completes lifecycle", completedStatus.status === "completed");
 } finally {
+  setStormProcessSpawnerForTesting(null);
   if (previousAgentDir === undefined) delete process.env.PI_AGENT_DIR;
   else process.env.PI_AGENT_DIR = previousAgentDir;
   rmSync(agentDir, { recursive: true, force: true });

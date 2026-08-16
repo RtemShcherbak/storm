@@ -36,6 +36,8 @@ function setLifecycleStatus(ctx, lifecycle) {
 
 export default async function stormExtension(pi) {
   const { createStormRunLifecycle } = await import("./lifecycle.js");
+  const { loadStormConfig } = await import("./config.js");
+  const { launchManagedStormProcess, getStormWorkspaceRoot } = await import("./process.js");
   const { runStormConfigCommand } = await import("./storm-config.js");
   const { runStormResumeCommand, runStormStartCommand } = await import("./runs.js");
   const lifecycle = createStormRunLifecycle();
@@ -58,6 +60,31 @@ export default async function stormExtension(pi) {
       const runDir = await runStormStartCommand(ctx, args);
       lifecycle.start(runDir, "research");
       setLifecycleStatus(ctx, lifecycle);
+
+      const agentConfig = await loadStormConfig();
+      const processHandle = launchManagedStormProcess({
+        config: agentConfig,
+        runDir,
+        workspaceRoot: getStormWorkspaceRoot(),
+      });
+
+      void processHandle.outcome.then((outcome) => {
+        if (outcome.kind === "success") {
+          lifecycle.setPhase("post_run");
+          lifecycle.markCompleted();
+          setLifecycleStatus(ctx, lifecycle);
+          return;
+        }
+        lifecycle.markFailed();
+        setLifecycleStatus(ctx, lifecycle);
+        ctx.ui.notify(
+          outcome.kind === "start-failure"
+            ? `STORM process start failed: ${outcome.error?.message ?? "unknown error"}`
+            : `STORM process failed: ${outcome.error?.message ?? `exit ${outcome.exitCode ?? "unknown"}`}`,
+          "error",
+        );
+      });
+
       return runDir;
     },
   });
