@@ -64,7 +64,7 @@ check(
 );
 
 for (const commandName of STORM_COMMANDS) {
-  if (commandName === "storm-config") continue;
+  if (commandName === "storm-config" || commandName === "storm-start" || commandName === "storm-resume") continue;
   const ctx = new FakeCommandContext();
   await pi.commands.get(commandName)?.handler("", ctx);
   check(`/${commandName} reports placeholder availability`, hasNotification(ctx, "not available yet"));

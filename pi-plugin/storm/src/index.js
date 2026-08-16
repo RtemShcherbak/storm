@@ -14,8 +14,8 @@ export const STORM_COMMANDS = Object.freeze([
 
 const COMMAND_DESCRIPTIONS = Object.freeze({
   "storm-config": "Configure persistent STORM settings.",
-  "storm-start": "Start a new Managed STORM run (placeholder).",
-  "storm-resume": "Resume an existing Managed STORM run (placeholder).",
+  "storm-start": "Create a new run-owned STORM artifact directory.",
+  "storm-resume": "Select or resume an existing STORM artifact directory.",
   "storm-cancel": "Cancel the active Managed STORM run (placeholder).",
   "storm-status": "Show Managed STORM run status (placeholder).",
   "storm-artifacts": "View Managed STORM run artifacts (placeholder).",
@@ -31,6 +31,7 @@ function notifyPlaceholder(ctx) {
 
 export default async function stormExtension(pi) {
   const { runStormConfigCommand } = await import("./storm-config.js");
+  const { runStormResumeCommand, runStormStartCommand } = await import("./runs.js");
 
   pi.registerCommand("storm-config", {
     description: COMMAND_DESCRIPTIONS["storm-config"],
@@ -40,8 +41,24 @@ export default async function stormExtension(pi) {
     },
   });
 
+  pi.registerCommand("storm-start", {
+    description: COMMAND_DESCRIPTIONS["storm-start"],
+    handler: async (args, ctx) => {
+      setNoActiveRunStatus(ctx);
+      await runStormStartCommand(ctx, args);
+    },
+  });
+
+  pi.registerCommand("storm-resume", {
+    description: COMMAND_DESCRIPTIONS["storm-resume"],
+    handler: async (args, ctx) => {
+      setNoActiveRunStatus(ctx);
+      await runStormResumeCommand(ctx, args);
+    },
+  });
+
   for (const commandName of STORM_COMMANDS) {
-    if (commandName === "storm-config") continue;
+    if (commandName === "storm-config" || commandName === "storm-start" || commandName === "storm-resume") continue;
     pi.registerCommand(commandName, {
       description: COMMAND_DESCRIPTIONS[commandName],
       handler: async (_args, ctx) => {
