@@ -134,6 +134,37 @@ try {
   const completedStatus = await pi.commands.get("storm-status")?.handler("", { ui: new FakeUi() });
   check("successful process exit completes lifecycle", completedStatus.status === "completed");
 
+  // Cancelling a run then letting the process exit must not mark it completed.
+  {
+    await saveStormConfig(
+      {
+        lmModels: {
+          conv_simulator_lm: "anthropic/claude-sonnet-4-5",
+          question_asker_lm: "anthropic/claude-sonnet-4-5",
+          outline_gen_lm: "anthropic/claude-sonnet-4-5",
+          article_gen_lm: "anthropic/claude-sonnet-4-5",
+          article_polish_lm: "anthropic/claude-sonnet-4-5",
+        },
+        retriever: { backend: "duckduckgo", settings: {} },
+        runtime: { outputRoot },
+      },
+      agentDir,
+    );
+    const cancelChild = new FakeChildProcess();
+    setStormProcessSpawnerForTesting(() => cancelChild);
+    const cancelStartCtx = { ui: new FakeUi() };
+    const cancelRunDir = await pi.commands.get("storm-start")?.handler("Cancel Topic", { ...cancelStartCtx, modelRegistry: fakeModelRegistry });
+    cancelChild.kill = () => true;
+    const cancelCtx = { ui: new FakeUi() };
+    const cancelled = await pi.commands.get("storm-cancel")?.handler("", cancelCtx);
+    check("cancel marks run cancelled", cancelled.status === "cancelled");
+    cancelChild.emitSpawn();
+    cancelChild.emitClose(0);
+    await new Promise((r) => setTimeout(r, 20));
+    const afterCancelStatus = await pi.commands.get("storm-status")?.handler("", { ui: new FakeUi() });
+    check("cancelled run is not overridden to completed", afterCancelStatus.status === "cancelled");
+  }
+
   // A config missing a retriever backend must block start before process launch.
   await saveStormConfig(
     {

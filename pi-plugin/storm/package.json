@@ -15,7 +15,7 @@
     ]
   },
   "scripts": {
-    "test": "node test/shell.test.js && node test/config.test.js && node test/artifacts.test.js && node test/runs.test.js && node test/lifecycle.test.js && node test/lifecycle-extension.test.js && node test/process.test.js && node test/models.test.js && node test/retrievers.test.js && node test/preflight.test.js && node test/start.test.js && node test/launcher.test.js && node test/lm-adapter.test.js && node test/retriever-adapter.test.js"
+    "test": "node test/shell.test.js && node test/config.test.js && node test/artifacts.test.js && node test/runs.test.js && node test/lifecycle.test.js && node test/lifecycle-extension.test.js && node test/process.test.js && node test/models.test.js && node test/retrievers.test.js && node test/preflight.test.js && node test/start.test.js && node test/launcher.test.js && node test/lm-adapter.test.js && node test/retriever-adapter.test.js && node test/cancel.test.js"
   },
   "engines": {
     "node": ">=20"

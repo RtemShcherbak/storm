@@ -16,7 +16,7 @@ const COMMAND_DESCRIPTIONS = Object.freeze({
   "storm-config": "Configure persistent STORM settings.",
   "storm-start": "Create a new run-owned STORM artifact directory.",
   "storm-resume": "Select or resume an existing STORM artifact directory.",
-  "storm-cancel": "Cancel the active Managed STORM run (placeholder).",
+  "storm-cancel": "Cancel the active Managed STORM run.",
   "storm-status": "Show Managed STORM run status.",
   "storm-artifacts": "View Managed STORM run artifacts (placeholder).",
 });
@@ -40,9 +40,11 @@ export default async function stormExtension(pi) {
   const { getStormWorkspaceRoot } = await import("./process.js");
   const { runStormPreflight } = await import("./preflight.js");
   const { inspectStormArtifacts } = await import("./artifacts.js");
+  const { cancelActiveStormRun } = await import("./cancel.js");
   const { runStormConfigCommand } = await import("./storm-config.js");
   const { runStormResumeCommand, runStormStartCommand } = await import("./runs.js");
   const lifecycle = createStormRunLifecycle();
+  let activeChild = null;
 
   async function preflightFor(ctx, config) {
     const problems = await runStormPreflight({
@@ -79,11 +81,15 @@ export default async function stormExtension(pi) {
       const ok = await preflightFor(ctx, agentConfig);
       if (!ok) return null;
 
-      const { runDir, outcome } = await runStormStartCommand(ctx, args);
+      const { runDir, outcome, child } = await runStormStartCommand(ctx, args);
+      activeChild = child;
       lifecycle.start(runDir, "research");
       setLifecycleStatus(ctx, lifecycle);
 
       void outcome.then(async (result) => {
+        if (lifecycle.snapshot().status === "cancelled") {
+          return;
+        }
         if (result.kind === "success") {
           lifecycle.setPhase("post_run");
           setLifecycleStatus(ctx, lifecycle);
@@ -110,6 +116,21 @@ export default async function stormExtension(pi) {
     },
   });
 
+  pi.registerCommand("storm-cancel", {
+    description: COMMAND_DESCRIPTIONS["storm-cancel"],
+    handler: async (_args, ctx) => {
+      const result = cancelActiveStormRun({ lifecycle, child: activeChild });
+      if (!result) {
+        ctx.ui.notify("No active STORM run to cancel.", "warning");
+        return null;
+      }
+      activeChild = null;
+      setLifecycleStatus(ctx, lifecycle);
+      ctx.ui.notify("STORM run cancelled.", "warning");
+      return result;
+    },
+  });
+
   pi.registerCommand("storm-resume", {
     description: COMMAND_DESCRIPTIONS["storm-resume"],
     handler: async (args, ctx) => {
@@ -131,7 +152,7 @@ export default async function stormExtension(pi) {
   });
 
   for (const commandName of STORM_COMMANDS) {
-    if (commandName === "storm-config" || commandName === "storm-start" || commandName === "storm-resume" || commandName === "storm-status") continue;
+    if (commandName === "storm-config" || commandName === "storm-start" || commandName === "storm-resume" || commandName === "storm-status" || commandName === "storm-cancel") continue;
     pi.registerCommand(commandName, {
       description: COMMAND_DESCRIPTIONS[commandName],
       handler: async (_args, ctx) => {

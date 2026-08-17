@@ -139,7 +139,7 @@ export async function runStormStartCommand(ctx, args = "", options = {}) {
   ctx.ui.notify(`Created STORM run directory: ${runDir}`, "info");
 
   const launcher = options.launcher ?? launchManagedStormProcess;
-  const { outcome } = launcher({
+  const launched = launcher({
     config,
     runDir,
     request,
@@ -147,7 +147,7 @@ export async function runStormStartCommand(ctx, args = "", options = {}) {
     ...(options.spawnProcess ? { spawnProcess: options.spawnProcess } : {}),
   });
 
-  return { runDir, request, outcome };
+  return { runDir, request, outcome: launched.outcome, child: launched.child ?? null };
 }
 
 export async function runStormResumeCommand(ctx, args = "", options = {}) {
