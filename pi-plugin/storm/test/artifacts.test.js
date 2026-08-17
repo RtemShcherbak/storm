@@ -58,8 +58,33 @@ try {
     check("missing polish stays incomplete", noPolish.stages.polish.complete === false);
     check("missing polish falls back to article primary result", basename(noPolish.primaryResult.path) === "storm_gen_article.txt");
     check("article primary result is still available without polish", noPolish.primaryResult.stage === "article");
+
+    const noPolishSelected = await inspectStormArtifacts(noPolishDir, {
+      selectedStages: { research: true, outline: true, article: true, polish: false },
+    });
+    check("unselected later stage is ignored for primary result", noPolishSelected.primaryResult.stage === "article");
   } finally {
     rmSync(noPolishDir, { recursive: true, force: true });
+  }
+
+  const laterArtifactUnselectedDir = mkdtempSync(join(tmpdir(), "storm-artifacts-test-unselected-later-stage-"));
+  try {
+    touch(join(laterArtifactUnselectedDir, "conversation_log.json"));
+    touch(join(laterArtifactUnselectedDir, "raw_search_results.json"));
+    touch(join(laterArtifactUnselectedDir, "direct_gen_outline.txt"));
+    touch(join(laterArtifactUnselectedDir, "storm_gen_outline.txt"));
+    touch(join(laterArtifactUnselectedDir, "storm_gen_article.txt"));
+    touch(join(laterArtifactUnselectedDir, "url_to_info.json"));
+    touch(join(laterArtifactUnselectedDir, "storm_gen_article_polished.txt"));
+
+    const laterArtifactUnselected = await inspectStormArtifacts(laterArtifactUnselectedDir, {
+      selectedStages: { research: true, outline: true, article: true, polish: false },
+    });
+    check("canonical stage completion still sees later artifact", laterArtifactUnselected.stages.polish.complete === true);
+    check("primary result uses last completed selected stage", laterArtifactUnselected.primaryResult.stage === "article");
+    check("primary result does not switch to unselected polished artifact", basename(laterArtifactUnselected.primaryResult.path) === "storm_gen_article.txt");
+  } finally {
+    rmSync(laterArtifactUnselectedDir, { recursive: true, force: true });
   }
 
   const researchOnlyDir = mkdtempSync(join(tmpdir(), "storm-artifacts-test-research-only-"));

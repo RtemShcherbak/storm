@@ -52,15 +52,27 @@ function stageComplete(canonicalArtifacts, names) {
   return names.every((name) => canonicalArtifacts.some((artifact) => artifact.name === name));
 }
 
-function pickPrimaryStage(stages) {
-  if (stages.polish.complete) return "polish";
-  if (stages.article.complete) return "article";
-  if (stages.outline.complete) return "outline";
-  if (stages.research.complete) return "research";
+function normalizeSelectedStages(selectedStages) {
+  if (!selectedStages || typeof selectedStages !== "object") {
+    return { research: true, outline: true, article: true, polish: true };
+  }
+  return {
+    research: selectedStages.research !== false,
+    outline: selectedStages.outline !== false,
+    article: selectedStages.article !== false,
+    polish: selectedStages.polish !== false,
+  };
+}
+
+function pickPrimaryStage(stages, selectedStages) {
+  if (selectedStages.polish && stages.polish.complete) return "polish";
+  if (selectedStages.article && stages.article.complete) return "article";
+  if (selectedStages.outline && stages.outline.complete) return "outline";
+  if (selectedStages.research && stages.research.complete) return "research";
   return null;
 }
 
-export async function inspectStormArtifacts(runDir) {
+export async function inspectStormArtifacts(runDir, options = {}) {
   let entries = [];
   try {
     entries = await readdir(runDir);
@@ -72,6 +84,8 @@ export async function inspectStormArtifacts(runDir) {
     .filter((name) => STORM_CANONICAL_ARTIFACTS.includes(name))
     .sort((a, b) => STORM_CANONICAL_ARTIFACTS.indexOf(a) - STORM_CANONICAL_ARTIFACTS.indexOf(b))
     .map((name) => ({ name, path: pathFor(runDir, name) }));
+
+  const selectedStages = normalizeSelectedStages(options.selectedStages);
 
   const stages = {
     research: {
@@ -102,7 +116,7 @@ export async function inspectStormArtifacts(runDir) {
   stages.polish.complete = stageComplete(canonicalArtifacts, STAGE_ARTIFACTS.polish);
   stages.postRun.complete = stageComplete(canonicalArtifacts, STAGE_ARTIFACTS.postRun);
 
-  const primaryStage = pickPrimaryStage(stages);
+  const primaryStage = pickPrimaryStage(stages, selectedStages);
   const primaryResult = primaryStage
     ? {
         stage: primaryStage,
@@ -123,6 +137,7 @@ export async function inspectStormArtifacts(runDir) {
     runDir,
     metadata: { present: false, path: null },
     canonicalArtifacts,
+    selectedStages,
     stages,
     primaryResult,
   };
