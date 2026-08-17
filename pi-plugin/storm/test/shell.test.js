@@ -43,10 +43,6 @@ function check(name, condition) {
   console.log(`✓ ${name}`);
 }
 
-function hasNotification(ctx, fragment) {
-  return ctx.ui.notifications.some((notification) => notification.message.includes(fragment));
-}
-
 const pi = new FakePi();
 await stormExtension(pi);
 
@@ -62,11 +58,5 @@ check(
   "sets no-active-run footer status on session start",
   sessionCtx.ui.statuses.get(STORM_STATUS_KEY) === NO_ACTIVE_RUN_STATUS,
 );
-
-for (const commandName of ["storm-artifacts"]) {
-  const ctx = new FakeCommandContext();
-  await pi.commands.get(commandName)?.handler("", ctx);
-  check(`/${commandName} reports placeholder availability`, hasNotification(ctx, "not available yet"));
-}
 
 check("does not register extra commands", pi.commands.size === STORM_COMMANDS.length);

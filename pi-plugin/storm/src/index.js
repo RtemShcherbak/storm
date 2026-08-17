@@ -1,7 +1,5 @@
 export const STORM_STATUS_KEY = "storm";
 export const NO_ACTIVE_RUN_STATUS = "○ STORM: no active run";
-export const PLACEHOLDER_MESSAGE =
-  "Managed STORM run command is not available yet. This shell only registers the command surface for T01.";
 
 export const STORM_COMMANDS = Object.freeze([
   "storm-config",
@@ -18,15 +16,11 @@ const COMMAND_DESCRIPTIONS = Object.freeze({
   "storm-resume": "Select or resume an existing STORM artifact directory.",
   "storm-cancel": "Cancel the active Managed STORM run.",
   "storm-status": "Show Managed STORM run status.",
-  "storm-artifacts": "View Managed STORM run artifacts (placeholder).",
+  "storm-artifacts": "View a run's primary result and canonical artifacts.",
 });
 
 function setNoActiveRunStatus(ctx) {
   ctx.ui.setStatus(STORM_STATUS_KEY, NO_ACTIVE_RUN_STATUS);
-}
-
-function notifyPlaceholder(ctx) {
-  ctx.ui.notify(PLACEHOLDER_MESSAGE, "info");
 }
 
 function setLifecycleStatus(ctx, lifecycle) {
@@ -41,6 +35,8 @@ export default async function stormExtension(pi) {
   const { runStormPreflight } = await import("./preflight.js");
   const { inspectStormArtifacts } = await import("./artifacts.js");
   const { cancelActiveStormRun } = await import("./cancel.js");
+  const { buildArtifactView } = await import("./artifact-view.js");
+  const { loadStormRunPointer } = await import("./runs.js");
   const { computeResumeStageFlags } = await import("./resume.js");
   const { runStormConfigCommand } = await import("./storm-config.js");
   const { runStormResumeCommand, runStormStartCommand } = await import("./runs.js");
@@ -202,16 +198,37 @@ export default async function stormExtension(pi) {
     },
   });
 
-  for (const commandName of STORM_COMMANDS) {
-    if (commandName === "storm-config" || commandName === "storm-start" || commandName === "storm-resume" || commandName === "storm-status" || commandName === "storm-cancel") continue;
-    pi.registerCommand(commandName, {
-      description: COMMAND_DESCRIPTIONS[commandName],
-      handler: async (_args, ctx) => {
-        setNoActiveRunStatus(ctx);
-        notifyPlaceholder(ctx);
-      },
-    });
-  }
+  pi.registerCommand("storm-artifacts", {
+    description: COMMAND_DESCRIPTIONS["storm-artifacts"],
+    handler: async (args, ctx) => {
+      let runDir = typeof args === "string" && args.trim() ? args.trim() : null;
+      if (!runDir) {
+        const pointer = await loadStormRunPointer();
+        runDir = pointer.currentRunDir;
+      }
+      if (!runDir) {
+        ctx.ui.notify("No run directory to inspect. Start or resume a run first.", "warning");
+        return null;
+      }
+      // Artifact viewing reflects all completed artifacts regardless of current
+      // config stage selection, so adopted and differently-configured runs report
+      // their true stage-dependent primary result.
+      const snapshot = await inspectStormArtifacts(runDir);
+      const view = buildArtifactView(snapshot);
+      ctx.ui.notify(
+        `STORM primary result (${view.primaryResult?.label ?? "none"}): ${view.primaryResult?.path ?? "not available"}`,
+        "info",
+      );
+      const artifactNames = view.canonicalArtifacts.map((artifact) => artifact.name);
+      ctx.ui.notify(
+        artifactNames.length > 0
+          ? `STORM canonical artifacts (${artifactNames.length}): ${artifactNames.join(", ")}`
+          : "No canonical artifacts found in run directory.",
+        "info",
+      );
+      return view;
+    },
+  });
 
   pi.on("session_start", async (_event, ctx) => {
     setNoActiveRunStatus(ctx);
