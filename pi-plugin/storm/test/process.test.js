@@ -59,7 +59,7 @@ try {
   const invocation = buildStormProcessInvocation(defaultStormConfig(), { runDir });
   check("invocation uses configured python command", invocation.command === "python3");
   check("invocation targets workspace fork", invocation.options.cwd === getStormWorkspaceRoot());
-  check("invocation uses local knowledge_storm source", invocation.args.join(" ").includes("import knowledge_storm"));
+  check("invocation uses local knowledge_storm source", invocation.args.join(" ").includes("from knowledge_storm import"));
 
   const fakeChild = new FakeChildProcess();
   const spawnCalls = [];

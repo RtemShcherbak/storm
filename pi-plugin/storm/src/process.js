@@ -1,13 +1,7 @@
 import { spawn as nodeSpawn } from "node:child_process";
 import { delimiter, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-
-const STORM_INLINE_SCRIPT = [
-  "import os",
-  "import knowledge_storm",
-  "print('Managed STORM process ready')",
-  "print(os.getcwd())",
-].join("; ");
+import { buildStormLaunchEnv, buildStormLauncherScript } from "./launcher.js";
 
 let processSpawner = defaultProcessSpawner;
 
@@ -21,14 +15,19 @@ export function getStormWorkspaceRoot() {
 
 export function buildStormProcessInvocation(config, options = {}) {
   const workspaceRoot = options.workspaceRoot ?? getStormWorkspaceRoot();
+  const script = buildStormLauncherScript(config, {
+    runDir: options.runDir,
+    request: options.request,
+  });
   return {
     command: config.runtime.python,
-    args: ["-c", STORM_INLINE_SCRIPT],
+    args: ["-c", script],
     options: {
       cwd: workspaceRoot,
       runDir: options.runDir ?? null,
       env: {
         ...process.env,
+        ...buildStormLaunchEnv(config, { request: options.request }),
         PYTHONPATH: [workspaceRoot, process.env.PYTHONPATH].filter(Boolean).join(delimiter),
       },
     },
@@ -71,7 +70,7 @@ function createOutcomeHandle(kind, base, extra = {}) {
 }
 
 export function launchManagedStormProcess({ config, runDir, request, workspaceRoot, spawnProcess } = {}) {
-  const invocation = buildStormProcessInvocation(config, { workspaceRoot, runDir });
+  const invocation = buildStormProcessInvocation(config, { workspaceRoot, runDir, request });
   const diagnostics = buildDiagnostics();
   const spawnImpl = spawnProcess ?? processSpawner;
   let child = null;
