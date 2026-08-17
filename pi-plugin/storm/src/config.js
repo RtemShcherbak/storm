@@ -2,6 +2,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { homedir } from "node:os";
 import { defaultStormLmModels, normalizeStormLmModels } from "./models.js";
+import { defaultStormRetriever, normalizeStormRetriever } from "./retrievers.js";
 
 export const STORM_CONFIG_FILE = "storm.json";
 
@@ -16,6 +17,7 @@ export function getStormConfigPath(agentDir = getStormAgentDir()) {
 export function defaultStormConfig() {
   return {
     lmModels: defaultStormLmModels(),
+    retriever: defaultStormRetriever(),
     stageFlags: {
       doResearch: true,
       doGenerateOutline: true,
@@ -61,11 +63,13 @@ export function normalizeStormConfig(raw) {
   const defaults = defaultStormConfig();
   const source = raw && typeof raw === "object" ? raw : {};
   const lmModelsRaw = source.lmModels && typeof source.lmModels === "object" ? source.lmModels : {};
+  const retrieverRaw = source.retriever && typeof source.retriever === "object" ? source.retriever : {};
   const stageFlagsRaw = source.stageFlags && typeof source.stageFlags === "object" ? source.stageFlags : {};
   const runtimeRaw = source.runtime && typeof source.runtime === "object" ? source.runtime : {};
 
   return {
     lmModels: normalizeStormLmModels(lmModelsRaw),
+    retriever: normalizeStormRetriever(retrieverRaw),
     stageFlags: {
       doResearch: normalizeToggle(stageFlagsRaw.doResearch, defaults.stageFlags.doResearch),
       doGenerateOutline: normalizeToggle(stageFlagsRaw.doGenerateOutline, defaults.stageFlags.doGenerateOutline),
@@ -89,6 +93,7 @@ function toStoredConfig(config) {
   const normalized = normalizeStormConfig(config);
   return {
     lmModels: normalized.lmModels,
+    retriever: normalized.retriever,
     stageFlags: normalized.stageFlags,
     runtime: normalized.runtime,
   };
