@@ -36,6 +36,7 @@ export default async function stormExtension(pi) {
   const { inspectStormArtifacts } = await import("./artifacts.js");
   const { cancelActiveStormRun } = await import("./cancel.js");
   const { buildArtifactView } = await import("./artifact-view.js");
+  const { classifyProcessOutcome, buildErrorReport, formatErrorReport } = await import("./error-reporting.js");
   const { loadStormRunPointer } = await import("./runs.js");
   const { computeResumeStageFlags } = await import("./resume.js");
   const { runStormConfigCommand } = await import("./storm-config.js");
@@ -50,13 +51,25 @@ export default async function stormExtension(pi) {
       workspaceRoot: getStormWorkspaceRoot(),
     });
     if (problems.length > 0) {
-      ctx.ui.notify(
-        `STORM preflight failed:\n${problems.map((p) => `- ${p.message}`).join("\n")}`,
-        "error",
-      );
+      const report = buildErrorReport(problems);
+      ctx.ui.notify(formatErrorReport(report), "error");
       return false;
     }
     return true;
+  }
+
+  function notifyProcessOutcome(ctx, result) {
+    const category = classifyProcessOutcome(result);
+    const message =
+      result.error?.message ??
+      (result.exitCode != null ? `process exited with code ${result.exitCode}` : "process failed");
+    const report = buildErrorReport([], {
+      category,
+      message,
+      diagnostics: result.diagnostics ?? {},
+      error: result.error ?? null,
+    });
+    ctx.ui.notify(formatErrorReport(report), "error");
   }
 
   pi.registerCommand("storm-config", {
@@ -95,18 +108,19 @@ export default async function stormExtension(pi) {
             lifecycle.markCompleted();
           } else {
             lifecycle.markFailed();
+            const report = buildErrorReport([], {
+              category: "artifact-post-run",
+              message: "post-run artifacts missing after successful process exit",
+              diagnostics: result.diagnostics ?? {},
+            });
+            ctx.ui.notify(formatErrorReport(report), "error");
           }
           setLifecycleStatus(ctx, lifecycle);
           return;
         }
         lifecycle.markFailed();
         setLifecycleStatus(ctx, lifecycle);
-        ctx.ui.notify(
-          result.kind === "start-failure"
-            ? `STORM process start failed: ${result.error?.message ?? "unknown error"}`
-            : `STORM process failed: ${result.error?.message ?? `exit ${result.exitCode ?? "unknown"}`}`,
-          "error",
-        );
+        notifyProcessOutcome(ctx, result);
       });
 
       return runDir;
@@ -171,18 +185,19 @@ export default async function stormExtension(pi) {
             lifecycle.markCompleted();
           } else {
             lifecycle.markFailed();
+            const report = buildErrorReport([], {
+              category: "artifact-post-run",
+              message: "post-run artifacts missing after successful process exit",
+              diagnostics: result.diagnostics ?? {},
+            });
+            ctx.ui.notify(formatErrorReport(report), "error");
           }
           setLifecycleStatus(ctx, lifecycle);
           return;
         }
         lifecycle.markFailed();
         setLifecycleStatus(ctx, lifecycle);
-        ctx.ui.notify(
-          result.kind === "start-failure"
-            ? `STORM process start failed: ${result.error?.message ?? "unknown error"}`
-            : `STORM process failed: ${result.error?.message ?? `exit ${result.exitCode ?? "unknown"}`}`,
-          "error",
-        );
+        notifyProcessOutcome(ctx, result);
       });
 
       return runDir;

@@ -189,7 +189,7 @@ try {
   const preflightBlocked = await pi.commands.get("storm-start")?.handler("Blocked Topic", { ...blockedCtx2, modelRegistry: fakeModelRegistry });
   check("failed preflight blocks start", preflightBlocked === null);
   check("failed preflight does not launch a process", spawnCount === 0);
-  check("failed preflight reports missing requirement", blockedCtx2.ui.notifications.some((n) => n.message.includes("preflight failed")));
+  check("failed preflight reports missing requirement", blockedCtx2.ui.notifications.some((n) => n.message.includes("config-preflight")));
 } finally {
   setStormProcessSpawnerForTesting(null);
   setStormPreflightProbesForTesting(null);
