@@ -2,6 +2,7 @@ import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { randomBytes } from "node:crypto";
 import { dirname, join, resolve } from "node:path";
 import { getStormAgentDir, loadStormConfig } from "./config.js";
+import { launchManagedStormProcess, getStormWorkspaceRoot } from "./process.js";
 
 export const STORM_RUN_POINTER_FILE = "storm-run.json";
 
@@ -93,6 +94,21 @@ export async function createStormRunDirectory(config, topic, options = {}) {
   throw new Error("Unable to create a unique STORM run directory");
 }
 
+export function parseRunRequest(args, fallbackTopic = "Alpha Topic") {
+  const trimmed = typeof args === "string" ? args.trim() : "";
+  let topic = trimmed;
+  let groundTruthUrl;
+  const urlMatch = trimmed.match(/\s+--ground-truth-url=(\S+)/);
+  if (urlMatch) {
+    groundTruthUrl = urlMatch[1];
+    topic = trimmed.slice(0, urlMatch.index).trim();
+  }
+  return {
+    topic: topic || fallbackTopic,
+    ...(groundTruthUrl ? { groundTruthUrl } : {}),
+  };
+}
+
 async function resolveExplicitRunDir(args) {
   const trimmed = typeof args === "string" ? args.trim() : "";
   return trimmed ? normalizeRunDirPath(trimmed) : null;
@@ -112,11 +128,26 @@ export async function runStormStartCommand(ctx, args = "", options = {}) {
   if (!ctx || !ctx.ui) throw new Error("storm-start requires a UI-capable Pi context");
   const agentDir = options.agentDir ?? getStormAgentDir();
   const config = await loadStormConfig(agentDir);
-  const topic = typeof args === "string" && args.trim() ? args.trim() : (await ctx.ui.input("STORM topic", ""))?.trim() || "storm";
-  const runDir = await createStormRunDirectory(config, topic, options);
+  const parsed = parseRunRequest(args, "");
+  const request = {
+    topic: parsed.topic || (await ctx.ui.input("STORM topic", ""))?.trim() || "storm",
+    ...(parsed.groundTruthUrl ? { groundTruthUrl: parsed.groundTruthUrl } : {}),
+  };
+  if (options.groundTruthUrl) request.groundTruthUrl = options.groundTruthUrl;
+  const runDir = await createStormRunDirectory(config, request.topic, options);
   await saveStormRunPointer({ currentRunDir: runDir }, agentDir);
   ctx.ui.notify(`Created STORM run directory: ${runDir}`, "info");
-  return runDir;
+
+  const launcher = options.launcher ?? launchManagedStormProcess;
+  const { outcome } = launcher({
+    config,
+    runDir,
+    request,
+    workspaceRoot: options.workspaceRoot ?? getStormWorkspaceRoot(),
+    ...(options.spawnProcess ? { spawnProcess: options.spawnProcess } : {}),
+  });
+
+  return { runDir, request, outcome };
 }
 
 export async function runStormResumeCommand(ctx, args = "", options = {}) {

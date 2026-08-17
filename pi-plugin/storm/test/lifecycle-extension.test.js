@@ -1,5 +1,5 @@
 import { EventEmitter } from "node:events";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { saveStormConfig } from "../src/config.js";
@@ -122,8 +122,16 @@ try {
   check("blocked second start leaves lifecycle running", statusAfterBlock.status === "running" && statusAfterBlock.phase === "research");
 
   fakeChild.emitSpawn();
+  // The controlled process writes post_run canonical artifacts before exiting.
+  mkdirSync(firstRunDir, { recursive: true });
+  writeFileSync(join(firstRunDir, "conversation_log.json"), "{}", "utf8");
+  writeFileSync(join(firstRunDir, "raw_search_results.json"), "{}", "utf8");
+  writeFileSync(join(firstRunDir, "storm_gen_article_polished.txt"), "polished", "utf8");
+  writeFileSync(join(firstRunDir, "run_config.json"), "{}", "utf8");
+  writeFileSync(join(firstRunDir, "llm_call_history.jsonl"), "[]", "utf8");
   fakeChild.emitClose(0);
   await Promise.resolve();
+  await new Promise((r) => setTimeout(r, 0));
   const completedStatus = await pi.commands.get("storm-status")?.handler("", { ui: new FakeUi() });
   check("successful process exit completes lifecycle", completedStatus.status === "completed");
 

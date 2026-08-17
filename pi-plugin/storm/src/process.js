@@ -26,11 +26,19 @@ export function buildStormProcessInvocation(config, options = {}) {
     args: ["-c", STORM_INLINE_SCRIPT],
     options: {
       cwd: workspaceRoot,
+      runDir: options.runDir ?? null,
       env: {
         ...process.env,
         PYTHONPATH: [workspaceRoot, process.env.PYTHONPATH].filter(Boolean).join(delimiter),
       },
     },
+  };
+}
+
+export function buildStormRunRequest(runRequest) {
+  return {
+    topic: runRequest?.topic ?? null,
+    groundTruthUrl: runRequest?.groundTruthUrl ?? null,
   };
 }
 
@@ -62,8 +70,8 @@ function createOutcomeHandle(kind, base, extra = {}) {
   };
 }
 
-export function launchManagedStormProcess({ config, runDir, workspaceRoot, spawnProcess } = {}) {
-  const invocation = buildStormProcessInvocation(config, { workspaceRoot });
+export function launchManagedStormProcess({ config, runDir, request, workspaceRoot, spawnProcess } = {}) {
+  const invocation = buildStormProcessInvocation(config, { workspaceRoot, runDir });
   const diagnostics = buildDiagnostics();
   const spawnImpl = spawnProcess ?? processSpawner;
   let child = null;
@@ -80,6 +88,7 @@ export function launchManagedStormProcess({ config, runDir, workspaceRoot, spawn
     resolveOutcome(
       createOutcomeHandle(result.kind, {
         runDir,
+        request: buildStormRunRequest(request),
         command: invocation.command,
         args: invocation.args,
         cwd: invocation.options.cwd,

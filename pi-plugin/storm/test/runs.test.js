@@ -1,3 +1,4 @@
+import { EventEmitter } from "node:events";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
@@ -13,6 +14,16 @@ function check(name, condition) {
   if (!condition) throw new Error(`FAILED: ${name}`);
   console.log(`✓ ${name}`);
 }
+
+class FakeChildProcess extends EventEmitter {
+  constructor() {
+    super();
+    this.stdout = new EventEmitter();
+    this.stderr = new EventEmitter();
+  }
+}
+
+const noopSpawner = () => new FakeChildProcess();
 
 class FakeUi {
   constructor(responses = []) {
@@ -37,16 +48,20 @@ try {
   await saveStormConfig({ runtime: { outputRoot } }, agentDir);
 
   const startUi = new FakeUi();
-  const firstRunDir = await runStormStartCommand({ ui: startUi }, "Alpha Topic", {
+  const first = await runStormStartCommand({ ui: startUi }, "Alpha Topic", {
     agentDir,
     now: new Date("2026-08-16T12:34:56.000Z"),
     idFactory: () => "aaaa",
+    spawnProcess: noopSpawner,
   });
-  const secondRunDir = await runStormStartCommand({ ui: startUi }, "Alpha Topic", {
+  const second = await runStormStartCommand({ ui: startUi }, "Alpha Topic", {
     agentDir,
     now: new Date("2026-08-16T12:34:56.000Z"),
     idFactory: () => "bbbb",
+    spawnProcess: noopSpawner,
   });
+  const firstRunDir = first.runDir;
+  const secondRunDir = second.runDir;
 
   check("new runs land under configured output root", firstRunDir.startsWith(outputRoot) && secondRunDir.startsWith(outputRoot));
   check("same topic creates unique directories", firstRunDir !== secondRunDir);

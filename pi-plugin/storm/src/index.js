@@ -37,8 +37,9 @@ function setLifecycleStatus(ctx, lifecycle) {
 export default async function stormExtension(pi) {
   const { createStormRunLifecycle } = await import("./lifecycle.js");
   const { loadStormConfig } = await import("./config.js");
-  const { launchManagedStormProcess, getStormWorkspaceRoot } = await import("./process.js");
+  const { getStormWorkspaceRoot } = await import("./process.js");
   const { runStormPreflight } = await import("./preflight.js");
+  const { inspectStormArtifacts } = await import("./artifacts.js");
   const { runStormConfigCommand } = await import("./storm-config.js");
   const { runStormResumeCommand, runStormStartCommand } = await import("./runs.js");
   const lifecycle = createStormRunLifecycle();
@@ -78,29 +79,29 @@ export default async function stormExtension(pi) {
       const ok = await preflightFor(ctx, agentConfig);
       if (!ok) return null;
 
-      const runDir = await runStormStartCommand(ctx, args);
+      const { runDir, outcome } = await runStormStartCommand(ctx, args);
       lifecycle.start(runDir, "research");
       setLifecycleStatus(ctx, lifecycle);
 
-      const processHandle = launchManagedStormProcess({
-        config: agentConfig,
-        runDir,
-        workspaceRoot: getStormWorkspaceRoot(),
-      });
-
-      void processHandle.outcome.then((outcome) => {
-        if (outcome.kind === "success") {
+      void outcome.then(async (result) => {
+        if (result.kind === "success") {
           lifecycle.setPhase("post_run");
-          lifecycle.markCompleted();
+          setLifecycleStatus(ctx, lifecycle);
+          const snapshot = await inspectStormArtifacts(runDir);
+          if (snapshot.stages.postRun.complete) {
+            lifecycle.markCompleted();
+          } else {
+            lifecycle.markFailed();
+          }
           setLifecycleStatus(ctx, lifecycle);
           return;
         }
         lifecycle.markFailed();
         setLifecycleStatus(ctx, lifecycle);
         ctx.ui.notify(
-          outcome.kind === "start-failure"
-            ? `STORM process start failed: ${outcome.error?.message ?? "unknown error"}`
-            : `STORM process failed: ${outcome.error?.message ?? `exit ${outcome.exitCode ?? "unknown"}`}`,
+          result.kind === "start-failure"
+            ? `STORM process start failed: ${result.error?.message ?? "unknown error"}`
+            : `STORM process failed: ${result.error?.message ?? `exit ${result.exitCode ?? "unknown"}`}`,
           "error",
         );
       });
