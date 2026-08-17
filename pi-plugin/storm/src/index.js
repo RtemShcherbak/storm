@@ -38,9 +38,26 @@ export default async function stormExtension(pi) {
   const { createStormRunLifecycle } = await import("./lifecycle.js");
   const { loadStormConfig } = await import("./config.js");
   const { launchManagedStormProcess, getStormWorkspaceRoot } = await import("./process.js");
+  const { runStormPreflight } = await import("./preflight.js");
   const { runStormConfigCommand } = await import("./storm-config.js");
   const { runStormResumeCommand, runStormStartCommand } = await import("./runs.js");
   const lifecycle = createStormRunLifecycle();
+
+  async function preflightFor(ctx, config) {
+    const problems = await runStormPreflight({
+      config,
+      modelRegistry: ctx.modelRegistry,
+      workspaceRoot: getStormWorkspaceRoot(),
+    });
+    if (problems.length > 0) {
+      ctx.ui.notify(
+        `STORM preflight failed:\n${problems.map((p) => `- ${p.message}`).join("\n")}`,
+        "error",
+      );
+      return false;
+    }
+    return true;
+  }
 
   pi.registerCommand("storm-config", {
     description: COMMAND_DESCRIPTIONS["storm-config"],
@@ -57,11 +74,14 @@ export default async function stormExtension(pi) {
         ctx.ui.notify(`Cannot start a second STORM run while one is active: ${lifecycle.snapshot().runDir}`, "error");
         return null;
       }
+      const agentConfig = await loadStormConfig();
+      const ok = await preflightFor(ctx, agentConfig);
+      if (!ok) return null;
+
       const runDir = await runStormStartCommand(ctx, args);
       lifecycle.start(runDir, "research");
       setLifecycleStatus(ctx, lifecycle);
 
-      const agentConfig = await loadStormConfig();
       const processHandle = launchManagedStormProcess({
         config: agentConfig,
         runDir,
@@ -93,6 +113,9 @@ export default async function stormExtension(pi) {
     description: COMMAND_DESCRIPTIONS["storm-resume"],
     handler: async (args, ctx) => {
       setNoActiveRunStatus(ctx);
+      const agentConfig = await loadStormConfig();
+      const ok = await preflightFor(ctx, agentConfig);
+      if (!ok) return null;
       return await runStormResumeCommand(ctx, args);
     },
   });

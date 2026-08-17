@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { saveStormConfig } from "../src/config.js";
 import stormExtension from "../src/index.js";
 import { setStormProcessSpawnerForTesting } from "../src/process.js";
+import { setStormPreflightProbesForTesting } from "../src/preflight.js";
 
 function check(name, condition) {
   if (!condition) throw new Error(`FAILED: ${name}`);
@@ -66,9 +67,35 @@ const outputRoot = mkdtempSync(join(tmpdir(), "storm-lifecycle-output-"));
 const previousAgentDir = process.env.PI_AGENT_DIR;
 const fakeChild = new FakeChildProcess();
 setStormProcessSpawnerForTesting(() => fakeChild);
+setStormPreflightProbesForTesting({
+  pythonAvailable: async () => true,
+  stormImportable: async () => true,
+  outputWritable: async () => true,
+});
 process.env.PI_AGENT_DIR = agentDir;
+const fakeModelRegistry = {
+  async getAvailable() {
+    return [{ provider: "anthropic", id: "claude-sonnet-4-5" }];
+  },
+  find(provider, id) {
+    return provider === "anthropic" && id === "claude-sonnet-4-5" ? { provider, id } : undefined;
+  },
+};
 try {
-  await saveStormConfig({ runtime: { outputRoot } }, agentDir);
+  await saveStormConfig(
+    {
+      lmModels: {
+        conv_simulator_lm: "anthropic/claude-sonnet-4-5",
+        question_asker_lm: "anthropic/claude-sonnet-4-5",
+        outline_gen_lm: "anthropic/claude-sonnet-4-5",
+        article_gen_lm: "anthropic/claude-sonnet-4-5",
+        article_polish_lm: "anthropic/claude-sonnet-4-5",
+      },
+      retriever: { backend: "duckduckgo", settings: {} },
+      runtime: { outputRoot },
+    },
+    agentDir,
+  );
 
   const pi = new FakePi();
   await stormExtension(pi);
@@ -78,7 +105,7 @@ try {
   check("session start still shows no active run", sessionCtx.ui.statuses.get("storm") === "○ STORM: no active run");
 
   const startCtx = { ui: new FakeUi() };
-  const firstRunDir = await pi.commands.get("storm-start")?.handler("Alpha Topic", startCtx);
+  const firstRunDir = await pi.commands.get("storm-start")?.handler("Alpha Topic", { ...startCtx, modelRegistry: fakeModelRegistry });
   check("starting a run returns a run directory", typeof firstRunDir === "string" && firstRunDir.startsWith(outputRoot));
   check("starting a run marks running research", startCtx.ui.statuses.get("storm") === "○ STORM: running:research");
 
@@ -99,8 +126,35 @@ try {
   await Promise.resolve();
   const completedStatus = await pi.commands.get("storm-status")?.handler("", { ui: new FakeUi() });
   check("successful process exit completes lifecycle", completedStatus.status === "completed");
+
+  // A config missing a retriever backend must block start before process launch.
+  await saveStormConfig(
+    {
+      lmModels: {
+        conv_simulator_lm: "anthropic/claude-sonnet-4-5",
+        question_asker_lm: "anthropic/claude-sonnet-4-5",
+        outline_gen_lm: "anthropic/claude-sonnet-4-5",
+        article_gen_lm: "anthropic/claude-sonnet-4-5",
+        article_polish_lm: "anthropic/claude-sonnet-4-5",
+      },
+      retriever: { backend: null, settings: {} },
+      runtime: { outputRoot },
+    },
+    agentDir,
+  );
+  let spawnCount = 0;
+  setStormProcessSpawnerForTesting(() => {
+    spawnCount += 1;
+    return new FakeChildProcess();
+  });
+  const blockedCtx2 = { ui: new FakeUi() };
+  const preflightBlocked = await pi.commands.get("storm-start")?.handler("Blocked Topic", { ...blockedCtx2, modelRegistry: fakeModelRegistry });
+  check("failed preflight blocks start", preflightBlocked === null);
+  check("failed preflight does not launch a process", spawnCount === 0);
+  check("failed preflight reports missing requirement", blockedCtx2.ui.notifications.some((n) => n.message.includes("preflight failed")));
 } finally {
   setStormProcessSpawnerForTesting(null);
+  setStormPreflightProbesForTesting(null);
   if (previousAgentDir === undefined) delete process.env.PI_AGENT_DIR;
   else process.env.PI_AGENT_DIR = previousAgentDir;
   rmSync(agentDir, { recursive: true, force: true });
