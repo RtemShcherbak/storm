@@ -37,10 +37,11 @@ function setLifecycleStatus(ctx, lifecycle) {
 export default async function stormExtension(pi) {
   const { createStormRunLifecycle } = await import("./lifecycle.js");
   const { loadStormConfig } = await import("./config.js");
-  const { getStormWorkspaceRoot } = await import("./process.js");
+  const { launchManagedStormProcess, getStormWorkspaceRoot } = await import("./process.js");
   const { runStormPreflight } = await import("./preflight.js");
   const { inspectStormArtifacts } = await import("./artifacts.js");
   const { cancelActiveStormRun } = await import("./cancel.js");
+  const { computeResumeStageFlags } = await import("./resume.js");
   const { runStormConfigCommand } = await import("./storm-config.js");
   const { runStormResumeCommand, runStormStartCommand } = await import("./runs.js");
   const lifecycle = createStormRunLifecycle();
@@ -135,10 +136,60 @@ export default async function stormExtension(pi) {
     description: COMMAND_DESCRIPTIONS["storm-resume"],
     handler: async (args, ctx) => {
       setNoActiveRunStatus(ctx);
+      if (lifecycle.isActive()) {
+        ctx.ui.notify(`Cannot resume while another STORM run is active: ${lifecycle.snapshot().runDir}`, "error");
+        return null;
+      }
       const agentConfig = await loadStormConfig();
       const ok = await preflightFor(ctx, agentConfig);
       if (!ok) return null;
-      return await runStormResumeCommand(ctx, args);
+      const runDir = await runStormResumeCommand(ctx, args);
+      if (!runDir) return null;
+
+      const snapshot = await inspectStormArtifacts(runDir, {
+        selectedStages: agentConfig.stageFlags,
+      });
+      const resumeFlags = computeResumeStageFlags(snapshot, agentConfig.stageFlags);
+      const resumeConfig = {
+        ...agentConfig,
+        stageFlags: resumeFlags,
+      };
+
+      lifecycle.start(runDir, "research");
+      setLifecycleStatus(ctx, lifecycle);
+      const handle = launchManagedStormProcess({
+        config: resumeConfig,
+        runDir,
+        request: { topic: null },
+        workspaceRoot: getStormWorkspaceRoot(),
+      });
+      activeChild = handle.child ?? null;
+
+      void handle.outcome.then(async (result) => {
+        if (lifecycle.snapshot().status === "cancelled") return;
+        if (result.kind === "success") {
+          lifecycle.setPhase("post_run");
+          setLifecycleStatus(ctx, lifecycle);
+          const postSnapshot = await inspectStormArtifacts(runDir);
+          if (postSnapshot.stages.postRun.complete) {
+            lifecycle.markCompleted();
+          } else {
+            lifecycle.markFailed();
+          }
+          setLifecycleStatus(ctx, lifecycle);
+          return;
+        }
+        lifecycle.markFailed();
+        setLifecycleStatus(ctx, lifecycle);
+        ctx.ui.notify(
+          result.kind === "start-failure"
+            ? `STORM process start failed: ${result.error?.message ?? "unknown error"}`
+            : `STORM process failed: ${result.error?.message ?? `exit ${result.exitCode ?? "unknown"}`}`,
+          "error",
+        );
+      });
+
+      return runDir;
     },
   });
 
