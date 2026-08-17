@@ -3,6 +3,7 @@ import { mkdir, unlink, writeFile } from "node:fs/promises";
 import { delimiter, join, resolve } from "node:path";
 import { randomBytes } from "node:crypto";
 import { STORM_LM_ROLES, describeStormModelRef } from "./models.js";
+import { buildLmAdapterSeam } from "./lm-adapter.js";
 import {
   getStormRetrieverDef,
   missingRetrieverCredentials,
@@ -91,7 +92,8 @@ export async function runStormPreflight({ config, modelRegistry, env = process.e
 
   const availableRefs = await listAvailableModelRefs(modelRegistry);
 
-  // LM model selections.
+  // LM model selections via the resolved adapter seam.
+  const lmAdapter = buildLmAdapterSeam(config.lmModels);
   for (const role of STORM_LM_ROLES) {
     const ref = config.lmModels?.[role];
     if (!ref) {
@@ -103,6 +105,11 @@ export async function runStormPreflight({ config, modelRegistry, env = process.e
       problems.push(
         makeProblem("lm-unavailable", `Model ${ref} for ${role} is ${described.state}`, role),
       );
+    }
+  }
+  if (lmAdapter.missingRoles.length > 0) {
+    for (const role of lmAdapter.missingRoles) {
+      problems.push(makeProblem("lm-incompatible", `Adapter: missing model for role ${role}`, role));
     }
   }
 

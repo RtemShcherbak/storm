@@ -158,6 +158,19 @@ try {
   setStormPreflightProbesForTesting(null);
 }
 
+// 8a. Adapter incompatibility (missing role) is surfaced as launch-blocking.
+{
+  const cfg = completeConfig();
+  cfg.lmModels.conv_simulator_lm = null;
+  const problems = await runStormPreflight({
+    config: cfg,
+    modelRegistry: new FakeModelRegistry(availableRefs),
+    env: { YDC_API_KEY: "x" },
+    probes: passingProbes(),
+  });
+  check("adapter missing role is surfaced", problems.some((p) => p.code === "lm-incompatible"));
+}
+
 // 8. Multiple missing requirements reported together.
 {
   const cfg = completeConfig();

@@ -8,6 +8,11 @@ function check(name, condition) {
 
 function config(overrides = {}) {
   const c = defaultStormConfig();
+  c.lmModels.conv_simulator_lm = "anthropic/claude-sonnet-4-5";
+  c.lmModels.question_asker_lm = "anthropic/claude-sonnet-4-5";
+  c.lmModels.outline_gen_lm = "anthropic/claude-sonnet-4-5";
+  c.lmModels.article_gen_lm = "anthropic/claude-sonnet-4-5";
+  c.lmModels.article_polish_lm = "anthropic/claude-sonnet-4-5";
   c.runtime.outputRoot = "/tmp/out";
   c.stageFlags.doResearch = true;
   c.stageFlags.doGenerateOutline = true;
@@ -53,7 +58,15 @@ function config(overrides = {}) {
   check("uses run dir", script.includes("/tmp/out/topic"));
 }
 
-// 7. Runtime/stage/retriever flow through the env payload as the single source.
+// 7. Env uses the resolved LM adapter seam to carry all five model refs.
+{
+  const cfg = config();
+  const env = buildStormLaunchEnv(cfg, { request: { topic: "Topic" } });
+  const payload = JSON.parse(env.STORM_LAUNCH_CONFIG);
+  check("env carries all five adapter model refs", payload.lm_models.conv_simulator_lm === "anthropic/claude-sonnet-4-5" && payload.lm_models.article_polish_lm === "anthropic/claude-sonnet-4-5");
+}
+
+// 8. Runtime/stage/retriever flow through the env payload as the single source.
 {
   const cfg = config();
   cfg.runtime.maxConvTurn = 7;

@@ -1,3 +1,5 @@
+import { buildLmAdapterSeam } from "./lm-adapter.js";
+
 function pyBool(value) {
   return value ? "True" : "False";
 }
@@ -34,11 +36,18 @@ export function buildStormLauncherScript(config, options = {}) {
     "import os",
     "import json",
     "from knowledge_storm import STORMWikiRunnerArguments, STORMWikiLMConfigs, STORMWikiRunner",
+    "from knowledge_storm.lm import LitellmModel",
     "",
-    "def build_lm_configs(seam):",
-    "    # INTEGRATION SEAM: Pi-to-STORM LM adapter (resolved in T12).",
+    "def build_lm_configs(lm_models):",
+    "    # Pi-to-STORM LM adapter (T12): map each selected Pi model ref to a",
+    "    # LitellmModel for its role. Unset roles are incompatible and block launch.",
     "    lm_configs = STORMWikiLMConfigs()",
-    "    seam(lm_configs)",
+    "    roles = ['conv_simulator_lm', 'question_asker_lm', 'outline_gen_lm', 'article_gen_lm', 'article_polish_lm']",
+    "    for role in roles:",
+    "        ref = (lm_models or {}).get(role)",
+    "        if not ref:",
+    "            raise RuntimeError('missing role %s (no model selected)' % role)",
+    "        setattr(lm_configs, role, LitellmModel(model=ref))",
     "    return lm_configs",
     "",
     "def build_rm(seam, k):",
@@ -52,12 +61,11 @@ export function buildStormLauncherScript(config, options = {}) {
     "    stage = config.get('stage_flags', {})",
     "    runtime = config.get('runtime', {})",
     "    retriever = config.get('retriever', {})",
+    "    lm_models = config.get('lm_models', {})",
     "",
     `    engine_args = STORMWikiRunnerArguments(\n        ${runnerArgs}\n    )`,
     "",
-    "    # INTEGRATION SEAMS: adapter/lm and retriever are provided by the caller",
-    "    # via environment or importable hooks in a later ticket.",
-    "    lm_configs = build_lm_configs(_noop_lm_seam)",
+    "    lm_configs = build_lm_configs(lm_models)",
     "    rm = build_rm(_noop_rm_seam, engine_args.search_top_k)",
     "",
     "    runner = STORMWikiRunner(engine_args, lm_configs, rm)",
@@ -70,9 +78,6 @@ export function buildStormLauncherScript(config, options = {}) {
     `        do_polish_article=${pyBool(stageFlags.doPolishArticle ?? true)},`,
     "    )",
     "    runner.post_run()",
-    "",
-    "def _noop_lm_seam(lm_configs):",
-    "    return lm_configs",
     "",
     "def _noop_rm_seam(k):",
     "    raise RuntimeError('retriever seam not wired (T13)')",
@@ -89,10 +94,12 @@ export function buildStormLauncherScript(config, options = {}) {
  */
 export function buildStormLaunchEnv(config, options = {}) {
   const request = options.request ?? {};
+  const { modelRefs } = buildLmAdapterSeam(config.lmModels);
   return {
     STORM_LAUNCH_CONFIG: JSON.stringify({
       topic: request.topic ?? null,
       ground_truth_url: request.groundTruthUrl ?? null,
+      lm_models: modelRefs,
       stage_flags: {
         do_research: config.stageFlags?.doResearch ?? true,
         do_generate_outline: config.stageFlags?.doGenerateOutline ?? true,

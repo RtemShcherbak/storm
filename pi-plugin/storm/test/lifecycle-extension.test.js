@@ -130,8 +130,7 @@ try {
   writeFileSync(join(firstRunDir, "run_config.json"), "{}", "utf8");
   writeFileSync(join(firstRunDir, "llm_call_history.jsonl"), "[]", "utf8");
   fakeChild.emitClose(0);
-  await Promise.resolve();
-  await new Promise((r) => setTimeout(r, 0));
+  await new Promise((r) => setTimeout(r, 20));
   const completedStatus = await pi.commands.get("storm-status")?.handler("", { ui: new FakeUi() });
   check("successful process exit completes lifecycle", completedStatus.status === "completed");
 
