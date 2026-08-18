@@ -52,7 +52,7 @@ export async function runStormConfigCommand(ctx, options = {}) {
   const extra = extractExtraKeys(raw);
   const draft = createEditorDraft(current, extra);
 
-  if (commandContext.mode !== "tui") {
+  if (typeof commandContext.ui.custom !== "function") {
     commandContext.ui.notify(
       "Editing STORM configuration is available only in TUI. Showing current configuration (read-only).",
       "warning",

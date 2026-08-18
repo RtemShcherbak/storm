@@ -76,7 +76,7 @@ export default async function stormExtension(pi) {
     description: COMMAND_DESCRIPTIONS["storm-config"],
     handler: async (_args, ctx) => {
       setNoActiveRunStatus(ctx);
-      await runStormConfigCommand(ctx);
+      return runStormConfigCommand(ctx);
     },
   });
 

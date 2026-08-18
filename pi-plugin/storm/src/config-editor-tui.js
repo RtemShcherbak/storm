@@ -49,7 +49,7 @@ async function loadTui() {
 }
 
 async function openSelectList(ctx, title, items, currentValue) {
-  if (ctx.mode !== "tui") return null;
+  if (typeof ctx.ui?.custom !== "function") return null;
   const tui = await loadTui();
   if (!tui) return null;
   const { Container, SelectList, Text } = tui;
@@ -74,7 +74,7 @@ async function openSelectList(ctx, title, items, currentValue) {
 }
 
 async function openModelPicker(ctx, role, currentRef) {
-  if (ctx.mode !== "tui") return null;
+  if (typeof ctx.ui?.custom !== "function") return null;
   try {
     await ctx.modelRegistry?.refresh?.();
   } catch {
@@ -90,7 +90,7 @@ async function openModelPicker(ctx, role, currentRef) {
 }
 
 async function openRetrieverPicker(ctx, currentBackend) {
-  if (ctx.mode !== "tui") return null;
+  if (typeof ctx.ui?.custom !== "function") return null;
   const defs = listStormRetrievers();
   const items = [
     { value: MODEL_PICKER_CLEAR, label: "Clear selection (unset)" },
@@ -104,7 +104,7 @@ async function openRetrieverPicker(ctx, currentBackend) {
  * Resolves to { action: "save", draft } or { action: "cancel", draft }.
  */
 export async function showConfigEditor(ctx, { draft, defaults, env = process.env }) {
-  if (ctx.mode !== "tui") {
+  if (typeof ctx.ui?.custom !== "function") {
     return { action: "cancel", draft };
   }
   const tui = await loadTui();
@@ -177,15 +177,18 @@ export async function showConfigEditor(ctx, { draft, defaults, env = process.env
   }
 
   let resolveResult;
+  let finishEditor = () => {};
   const resultPromise = new Promise((resolve) => { resolveResult = resolve; });
 
   function handleAction(id) {
     if (id === "__save__") {
       resolveResult({ action: "save", draft: edited });
+      finishEditor();
       return;
     }
     if (id === "__cancel__") {
       resolveResult({ action: "cancel", draft: edited });
+      finishEditor();
       return;
     }
     if (id === "__reset__") {
@@ -259,6 +262,7 @@ export async function showConfigEditor(ctx, { draft, defaults, env = process.env
   }
 
   await ctx.ui.custom((_tui, theme, _kb, done) => {
+    finishEditor = done;
     const container = new Container();
     container.addChild(new Text(theme.fg("accent", theme.bold("STORM configuration")), 1, 1));
     const list = new SettingsList(
