@@ -1,6 +1,12 @@
 export const STORM_STATUS_KEY = "storm";
 export const NO_ACTIVE_RUN_STATUS = "○ STORM: no active run";
 
+// Imported statically (not via await import) so Pi's jiti loader applies its
+// aliases for @earendil-works/pi-tui and pi-coding-agent inside config-editor-tui.
+// A dynamic await import() resolves sub-modules with Node's native ESM resolver,
+// which has no such aliases and fails with "Cannot find package".
+import { showConfigEditor } from "./config-editor-tui.js";
+
 export const STORM_COMMANDS = Object.freeze([
   "storm-config",
   "storm-start",
@@ -76,7 +82,7 @@ export default async function stormExtension(pi) {
     description: COMMAND_DESCRIPTIONS["storm-config"],
     handler: async (_args, ctx) => {
       setNoActiveRunStatus(ctx);
-      return runStormConfigCommand(ctx);
+      return runStormConfigCommand(ctx, { editor: showConfigEditor });
     },
   });
 

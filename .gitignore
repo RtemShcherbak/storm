@@ -24,4 +24,7 @@ secrets.toml
 *.log
 */assertion.log
 *results/
-.venv/
+.venv
+
+# pi extension local core-package resolution (symlinks into the pi install)
+pi-plugin/storm/node_modules//

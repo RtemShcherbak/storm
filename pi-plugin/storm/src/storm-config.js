@@ -60,11 +60,15 @@ export async function runStormConfigCommand(ctx, options = {}) {
     return { readOnly: true, config: current };
   }
 
-  // Load the TUI editor lazily so the static `@earendil-works/pi-tui` import
-  // inside it is only resolved when a real TUI session runs the command (the
-  // jiti loader resolves it there, matching RLM). Non-TUI runs and tests inject
-  // a scripted editor and never load the TUI module.
-  const editor = options.editor ?? (await import("./config-editor-tui.js")).showConfigEditor;
+  // The TUI editor is injected by the extension entry (index.js), which loads
+  // config-editor-tui.js through jiti so its static @earendil-works/pi-tui /
+  // pi-coding-agent imports resolve via Pi's aliases. Non-TUI runs and tests
+  // inject a scripted editor instead and never touch the TUI module.
+  const editor = options.editor;
+  if (!editor) {
+    commandContext.ui.notify("storm-config editor unavailable in this context", "error");
+    return null;
+  }
   const result = await editor(commandContext, { draft, defaults, env: process.env });
 
   if (result.action === "save") {
