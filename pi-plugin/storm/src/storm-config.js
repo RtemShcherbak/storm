@@ -1,6 +1,5 @@
 import { defaultStormConfig, loadStormConfig, readStormConfigRaw, saveStormConfigRaw, getStormAgentDir } from "./config.js";
 import { createEditorDraft, toSavePayload, KNOWN_TOP_LEVEL_KEYS } from "./config-editor.js";
-import { showConfigEditor } from "./config-editor-tui.js";
 import { normalizeCommandContext } from "./prompt.js";
 
 function extractExtraKeys(raw) {
@@ -61,7 +60,11 @@ export async function runStormConfigCommand(ctx, options = {}) {
     return { readOnly: true, config: current };
   }
 
-  const editor = options.editor ?? showConfigEditor;
+  // Load the TUI editor lazily so the static `@earendil-works/pi-tui` import
+  // inside it is only resolved when a real TUI session runs the command (the
+  // jiti loader resolves it there, matching RLM). Non-TUI runs and tests inject
+  // a scripted editor and never load the TUI module.
+  const editor = options.editor ?? (await import("./config-editor-tui.js")).showConfigEditor;
   const result = await editor(commandContext, { draft, defaults, env: process.env });
 
   if (result.action === "save") {

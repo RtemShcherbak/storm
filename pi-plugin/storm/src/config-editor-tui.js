@@ -12,28 +12,11 @@ import {
 } from "./config-editor.js";
 import { buildEditorItems, RUNTIME_NUMERIC, RUNTIME_TEXT } from "./config-editor-items.js";
 import { STORM_LM_ROLES, stormModelRoleLabel } from "./models.js";
+import { getSettingsListTheme } from "@earendil-works/pi-coding-agent";
+import { Container, SelectList, SettingsList, Text } from "@earendil-works/pi-tui";
 
 export { buildEditorItems } from "./config-editor-items.js";
 export const MODEL_PICKER_CLEAR = "__storm_clear__";
-
-async function loadSettingsListTheme() {
-  try {
-    const agent = await import("@earendil-works/pi-coding-agent");
-    return agent.getSettingsListTheme?.() ?? null;
-  } catch {
-    return null;
-  }
-}
-
-async function loadTui() {
-  // Imported lazily so this module can be loaded (and the command invoked) in
-  // non-TUI environments without pi-tui being installed.
-  try {
-    return await import("@earendil-works/pi-tui");
-  } catch {
-    return null;
-  }
-}
 
 /**
  * Open a single-select picker as its own top-level `ctx.ui.custom` — never
@@ -43,9 +26,6 @@ async function loadTui() {
  */
 async function openSelectList(ctx, title, items, currentValue) {
   if (ctx.mode !== "tui" && typeof ctx.ui?.custom !== "function") return null;
-  const tui = await loadTui();
-  if (!tui) return null;
-  const { Container, SelectList, Text } = tui;
   const values = items.map((item) => item.value);
   return await ctx.ui.custom((_tui, theme, _kb, done) => {
     const container = new Container();
@@ -109,26 +89,11 @@ export async function showConfigEditor(ctx, { draft, defaults, env = process.env
   if (ctx.mode !== "tui" && typeof ctx.ui?.custom !== "function") {
     return { action: "cancel", draft };
   }
-  const tui = await loadTui();
-  if (!tui) return { action: "cancel", draft };
-  const settingsListTheme = await loadSettingsListTheme();
-  if (!settingsListTheme) return { action: "cancel", draft };
-  const { Container, SettingsList, Text } = tui;
-
   let edited = draft;
   let errorMessage = null;
 
   function buildItems() {
     return buildEditorItems(edited, { env, errorMessage });
-  }
-
-  function applyEdit(id, value) {
-    // Fields that just need a plain value update are applied inline and stay open.
-    if (id.startsWith("stage.")) {
-      edited = toggleStage(edited, id.slice("stage.".length));
-      return "stay";
-    }
-    return "edit"; // everything else needs a dedicated top-level picker/editor
   }
 
   // Main loop: keep re-opening the panel until the user saves or cancels.
@@ -139,13 +104,18 @@ export async function showConfigEditor(ctx, { draft, defaults, env = process.env
       const list = new SettingsList(
         buildItems(),
         buildItems().length + 2,
-        settingsListTheme,
+        getSettingsListTheme(),
         (id, value) => {
           if (id === "__save__") { done({ action: "save", draft: edited }); return; }
           if (id === "__cancel__") { done({ action: "cancel", draft: edited }); return; }
           if (id === "__reset__") {
             edited = resetDraftToDefaults(edited, defaults);
             errorMessage = null;
+            return;
+          }
+          if (id.startsWith("stage.")) {
+            // Pure toggle — apply inline and keep the panel open (RLM pattern).
+            edited = toggleStage(edited, id.slice("stage.".length));
             return;
           }
           // Everything else: close the panel and let the caller run a dedicated
