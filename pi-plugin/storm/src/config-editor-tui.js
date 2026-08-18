@@ -29,6 +29,15 @@ const RUNTIME_TEXT = [
 
 export const MODEL_PICKER_CLEAR = "__storm_clear__";
 
+async function loadSettingsListTheme() {
+  try {
+    const agent = await import("@earendil-works/pi-coding-agent");
+    return agent.getSettingsListTheme?.() ?? null;
+  } catch {
+    return null;
+  }
+}
+
 async function loadTui() {
   // Imported lazily so this module can be loaded (and the command invoked) in
   // non-TUI environments without pi-tui being installed.
@@ -100,6 +109,10 @@ export async function showConfigEditor(ctx, { draft, defaults, env = process.env
   }
   const tui = await loadTui();
   if (!tui) {
+    return { action: "cancel", draft };
+  }
+  const settingsListTheme = await loadSettingsListTheme();
+  if (!settingsListTheme) {
     return { action: "cancel", draft };
   }
   const { Container, SettingsList, Text } = tui;
@@ -251,7 +264,7 @@ export async function showConfigEditor(ctx, { draft, defaults, env = process.env
     const list = new SettingsList(
       buildItems(),
       buildItems().length + 2,
-      {},
+      settingsListTheme,
       handleAction,
       () => {
         resolveResult({ action: "cancel", draft: edited });
