@@ -1,3 +1,4 @@
+import { listStormRetrievers } from "./retrievers.js";
 import {
   setModel,
   clearModel,
@@ -8,10 +9,9 @@ import {
   setRuntimeNumber,
   setRuntimeText,
   resetDraftToDefaults,
-  STAGE_FIELDS,
 } from "./config-editor.js";
-import { listStormRetrievers } from "./retrievers.js";
 import { buildEditorItems, RUNTIME_NUMERIC, RUNTIME_TEXT } from "./config-editor-items.js";
+import { STORM_LM_ROLES, stormModelRoleLabel } from "./models.js";
 
 export { buildEditorItems } from "./config-editor-items.js";
 export const MODEL_PICKER_CLEAR = "__storm_clear__";
@@ -35,6 +35,12 @@ async function loadTui() {
   }
 }
 
+/**
+ * Open a single-select picker as its own top-level `ctx.ui.custom` — never
+ * nested inside another custom component (RLM pattern: model picking happens
+ * before the settings panel, never from within its onChange).
+ * Resolves to the selected value, or `null` on cancel/esc.
+ */
 async function openSelectList(ctx, title, items, currentValue) {
   if (ctx.mode !== "tui" && typeof ctx.ui?.custom !== "function") return null;
   const tui = await loadTui();
@@ -88,21 +94,27 @@ async function openRetrieverPicker(ctx, currentBackend) {
 
 /**
  * Show the interactive TUI config editor.
- * Resolves to { action: "save", draft } or { action: "cancel", draft }.
+ *
+ * Follows the RLM pattern: the settings panel is one `ctx.ui.custom` whose
+ * `done(result)` resolves the returned promise. Fields that need their own
+ * picker/editor are handled by closing the panel with `{ action: "edit", id }`
+ * and running that picker as a SEPARATE top-level `ctx.ui.custom` — never
+ * nested inside the panel's custom component (nested custom breaks Pi's
+ * showExtensionCustom, which only attaches the component after the factory
+ * resolves).
+ *
+ * Resolves to { action: "save" | "cancel", draft }.
  */
 export async function showConfigEditor(ctx, { draft, defaults, env = process.env }) {
   if (ctx.mode !== "tui" && typeof ctx.ui?.custom !== "function") {
     return { action: "cancel", draft };
   }
   const tui = await loadTui();
-  if (!tui) {
-    return { action: "cancel", draft };
-  }
+  if (!tui) return { action: "cancel", draft };
   const settingsListTheme = await loadSettingsListTheme();
-  if (!settingsListTheme) {
-    return { action: "cancel", draft };
-  }
+  if (!settingsListTheme) return { action: "cancel", draft };
   const { Container, SettingsList, Text } = tui;
+
   let edited = draft;
   let errorMessage = null;
 
@@ -110,113 +122,85 @@ export async function showConfigEditor(ctx, { draft, defaults, env = process.env
     return buildEditorItems(edited, { env, errorMessage });
   }
 
-  let resolveResult;
-  let finishEditor = () => {};
-  const resultPromise = new Promise((resolve) => { resolveResult = resolve; });
-
-  function handleAction(id) {
-    if (id === "__save__") {
-      resolveResult({ action: "save", draft: edited });
-      finishEditor();
-      return;
-    }
-    if (id === "__cancel__") {
-      resolveResult({ action: "cancel", draft: edited });
-      finishEditor();
-      return;
-    }
-    if (id === "__reset__") {
-      edited = resetDraftToDefaults(edited, defaults);
-      errorMessage = null;
-      return;
-    }
-    if (id.startsWith("model.")) {
-      void handleModelAction(id);
-      return;
-    }
-    if (id === "retriever.backend") {
-      void handleRetrieverAction();
-      return;
-    }
-    if (id.startsWith("retriever.setting.")) {
-      void handleRetrieverSettingAction(id);
-      return;
-    }
+  function applyEdit(id, value) {
+    // Fields that just need a plain value update are applied inline and stay open.
     if (id.startsWith("stage.")) {
-      const field = id.slice("stage.".length);
-      edited = toggleStage(edited, field);
-      return;
+      edited = toggleStage(edited, id.slice("stage.".length));
+      return "stay";
     }
-    if (id.startsWith("runtime.text.")) {
-      void handleRuntimeTextAction(id);
-      return;
+    return "edit"; // everything else needs a dedicated top-level picker/editor
+  }
+
+  // Main loop: keep re-opening the panel until the user saves or cancels.
+  while (true) {
+    const result = await ctx.ui.custom((_tui, theme, _kb, done) => {
+      const container = new Container();
+      container.addChild(new Text(theme.fg("accent", theme.bold("STORM configuration")), 1, 1));
+      const list = new SettingsList(
+        buildItems(),
+        buildItems().length + 2,
+        settingsListTheme,
+        (id, value) => {
+          if (id === "__save__") { done({ action: "save", draft: edited }); return; }
+          if (id === "__cancel__") { done({ action: "cancel", draft: edited }); return; }
+          if (id === "__reset__") {
+            edited = resetDraftToDefaults(edited, defaults);
+            errorMessage = null;
+            return;
+          }
+          // Everything else: close the panel and let the caller run a dedicated
+          // top-level picker/editor for the selected field.
+          done({ action: "edit", id, value });
+        },
+        () => done({ action: "cancel", draft: edited }),
+      );
+      container.addChild(list);
+      container.addChild(new Text(theme.fg("dim", "↑↓ move · enter change · esc cancel"), 1, 1));
+      return {
+        render: (w) => container.render(w),
+        invalidate: () => container.invalidate(),
+        handleInput: (data) => list.handleInput?.(data),
+      };
+    });
+
+    if (result.action !== "edit") {
+      return result;
     }
-    if (id.startsWith("runtime.num.")) {
-      void handleRuntimeNumAction(id);
-      return;
+
+    // Run the selected field's picker/editor as a separate top-level UI call.
+    const { id } = result;
+    if (id.startsWith("model.")) {
+      const role = id.slice("model.".length);
+      const choice = await openModelPicker(ctx, role, edited.lmModels[role]);
+      if (choice === MODEL_PICKER_CLEAR) edited = clearModel(edited, role);
+      else if (typeof choice === "string") edited = setModel(edited, role, choice);
+    } else if (id === "retriever.backend") {
+      const choice = await openRetrieverPicker(ctx, edited.retriever.backend);
+      if (choice === MODEL_PICKER_CLEAR) edited = clearRetriever(edited);
+      else if (typeof choice === "string") edited = setRetrieverBackend(edited, choice);
+    } else if (id.startsWith("retriever.setting.")) {
+      const key = id.slice("retriever.setting.".length);
+      const value = await ctx.ui.input(`Retriever ${key}`, edited.retriever.settings[key] ?? "");
+      edited = setRetrieverSetting(edited, key, typeof value === "string" ? value.trim() : "");
+    } else if (id.startsWith("runtime.text.")) {
+      const field = id.slice("runtime.text.".length);
+      const label = RUNTIME_TEXT.find(([f]) => f === field)?.[1] ?? field;
+      const value = await ctx.ui.input(label, edited.runtime[field] ?? "");
+      const res = setRuntimeText(edited, field, value);
+      errorMessage = res.error ?? null;
+      if (res.draft) edited = res.draft;
+    } else if (id.startsWith("runtime.num.")) {
+      const field = id.slice("runtime.num.".length);
+      const label = RUNTIME_NUMERIC.find(([f]) => f === field)?.[1] ?? field;
+      const value = await ctx.ui.input(label, String(edited.runtime[field] ?? ""));
+      const parsed = Number.parseInt(value, 10);
+      const res = setRuntimeNumber(edited, field, parsed);
+      errorMessage = res.error ?? null;
+      if (res.draft) edited = res.draft;
     }
+    // Loop back and re-open the panel with the updated draft.
   }
-
-  async function handleModelAction(id) {
-    const role = id.slice("model.".length);
-    const choice = await openModelPicker(ctx, role, edited.lmModels[role]);
-    if (choice === MODEL_PICKER_CLEAR) edited = clearModel(edited, role);
-    else if (typeof choice === "string") edited = setModel(edited, role, choice);
-  }
-
-  async function handleRetrieverAction() {
-    const choice = await openRetrieverPicker(ctx, edited.retriever.backend);
-    if (choice === MODEL_PICKER_CLEAR) edited = clearRetriever(edited);
-    else if (typeof choice === "string") edited = setRetrieverBackend(edited, choice);
-  }
-
-  async function handleRetrieverSettingAction(id) {
-    const key = id.slice("retriever.setting.".length);
-    const value = await ctx.ui.input(`Retriever ${key}`, edited.retriever.settings[key] ?? "");
-    edited = setRetrieverSetting(edited, key, typeof value === "string" ? value.trim() : "");
-  }
-
-  async function handleRuntimeTextAction(id) {
-    const field = id.slice("runtime.text.".length);
-    const label = RUNTIME_TEXT.find(([f]) => f === field)?.[1] ?? field;
-    const value = await ctx.ui.input(label, edited.runtime[field] ?? "");
-    const res = setRuntimeText(edited, field, value);
-    if (res.error) errorMessage = res.error;
-    else edited = res.draft;
-  }
-
-  async function handleRuntimeNumAction(id) {
-    const field = id.slice("runtime.num.".length);
-    const label = RUNTIME_NUMERIC.find(([f]) => f === field)?.[1] ?? field;
-    const value = await ctx.ui.input(label, String(edited.runtime[field] ?? ""));
-    const parsed = Number.parseInt(value, 10);
-    const res = setRuntimeNumber(edited, field, parsed);
-    if (res.error) errorMessage = res.error;
-    else edited = res.draft;
-  }
-
-  await ctx.ui.custom((_tui, theme, _kb, done) => {
-    finishEditor = done;
-    const container = new Container();
-    container.addChild(new Text(theme.fg("accent", theme.bold("STORM configuration")), 1, 1));
-    const list = new SettingsList(
-      buildItems(),
-      buildItems().length + 2,
-      settingsListTheme,
-      handleAction,
-      () => {
-        resolveResult({ action: "cancel", draft: edited });
-        done();
-      },
-    );
-    container.addChild(list);
-    container.addChild(new Text(theme.fg("dim", "↑↓ move · enter change · esc cancel"), 1, 1));
-    return {
-      render: (w) => container.render(w),
-      invalidate: () => container.invalidate(),
-      handleInput: (data) => list.handleInput?.(data),
-    };
-  });
-
-  return resultPromise;
 }
+
+// Re-export for callers that want the role list.
+export { STORM_LM_ROLES, stormModelRoleLabel };
