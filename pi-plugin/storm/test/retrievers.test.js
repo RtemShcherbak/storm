@@ -54,25 +54,3 @@ const searxngDef = getStormRetrieverDef("searxng");
 check("searxng missing non-secret param is surfaced", missingRetrieverSettings(searxngDef, {}).includes("apiUrl"));
 check("searxng ready when param present", missingRetrieverSettings(searxngDef, { apiUrl: "x" }).length === 0);
 
-// Interactive surfacing: selecting a credential backend warns about missing env var.
-const { promptStormRetriever } = await import("../src/retriever-config.js");
-class FakeUi {
-  constructor(responses = []) {
-    this.responses = responses;
-    this.notifications = [];
-  }
-  async input(prompt, initial) {
-    return this.responses.shift();
-  }
-  async select(prompt, options) {
-    return options.includes("you") ? "you" : options[0];
-  }
-  notify(message, level) {
-    this.notifications.push({ message, level });
-  }
-}
-const ui = new FakeUi([]);
-const prompted = await promptStormRetriever({ ui }, { backend: null, settings: {} });
-check("interactive selection persists backend", prompted.backend === "you");
-check("interactive selection surfaces missing credential", ui.notifications.some((n) => n.message.includes("missing: credential YDC_API_KEY")));
-

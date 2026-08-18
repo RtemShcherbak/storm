@@ -1,39 +1,80 @@
-import { defaultStormConfig, loadStormConfig, saveStormConfig } from "./config.js";
-import { promptStormLmModels } from "./lm-config.js";
-import { promptStormRetriever } from "./retriever-config.js";
-import { normalizeCommandContext, promptNumber, promptText, promptToggle } from "./prompt.js";
+import { defaultStormConfig, loadStormConfig, readStormConfigRaw, saveStormConfigRaw, getStormAgentDir } from "./config.js";
+import { createEditorDraft, toSavePayload, KNOWN_TOP_LEVEL_KEYS } from "./config-editor.js";
+import { showConfigEditor } from "./config-editor-tui.js";
+import { normalizeCommandContext } from "./prompt.js";
+
+function extractExtraKeys(raw) {
+  if (!raw || typeof raw !== "object") return {};
+  const extra = {};
+  for (const key of Object.keys(raw)) {
+    if (!KNOWN_TOP_LEVEL_KEYS.includes(key)) {
+      extra[key] = raw[key];
+    }
+  }
+  return extra;
+}
+
+function formatReadOnlySummary(config) {
+  const lines = [
+    "STORM configuration (read-only — editing available only in TUI):",
+    "",
+    "[Models]",
+    ...Object.entries(config.lmModels).map(([role, ref]) => `  ${role}: ${ref ?? "(unset)"}`),
+    "",
+    `[Retriever] backend: ${config.retriever?.backend ?? "(unset)"}`,
+    ...Object.entries(config.retriever?.settings ?? {}).map(([k, v]) => `  ${k}: ${v}`),
+    "",
+    "[Stages]",
+    `  doResearch: ${config.stageFlags?.doResearch ? "on" : "off"}`,
+    `  doGenerateOutline: ${config.stageFlags?.doGenerateOutline ? "on" : "off"}`,
+    `  doGenerateArticle: ${config.stageFlags?.doGenerateArticle ? "on" : "off"}`,
+    `  doPolishArticle: ${config.stageFlags?.doPolishArticle ? "on" : "off"}`,
+    "",
+    "[Runtime]",
+    `  outputRoot: ${config.runtime?.outputRoot}`,
+    `  python: ${config.runtime?.python}`,
+    `  maxConvTurn: ${config.runtime?.maxConvTurn}`,
+    `  maxPerspective: ${config.runtime?.maxPerspective}`,
+    `  maxSearchQueriesPerTurn: ${config.runtime?.maxSearchQueriesPerTurn}`,
+    `  searchTopK: ${config.runtime?.searchTopK}`,
+    `  retrieveTopK: ${config.runtime?.retrieveTopK}`,
+    `  maxThreadNum: ${config.runtime?.maxThreadNum}`,
+  ];
+  return lines.join("\n");
+}
 
 export async function runStormConfigCommand(ctx, options = {}) {
   const commandContext = normalizeCommandContext(ctx);
-  const agentDir = options.agentDir;
+  const agentDir = options.agentDir ?? getStormAgentDir();
+  const defaults = defaultStormConfig();
   const current = await loadStormConfig(agentDir);
-  const base = current ?? defaultStormConfig();
+  const raw = await readStormConfigRaw(agentDir);
+  const extra = extractExtraKeys(raw);
+  const draft = createEditorDraft(current, extra);
 
-  const runtime = {
-    outputRoot: await promptText(commandContext, "STORM output root", base.runtime.outputRoot),
-    python: await promptText(commandContext, "Python executable/command", base.runtime.python),
-    maxConvTurn: await promptNumber(commandContext, "Max conversation turns", base.runtime.maxConvTurn),
-    maxPerspective: await promptNumber(commandContext, "Max perspectives", base.runtime.maxPerspective),
-    maxSearchQueriesPerTurn: await promptNumber(commandContext, "Max search queries per turn", base.runtime.maxSearchQueriesPerTurn),
-    searchTopK: await promptNumber(commandContext, "Search top-k", base.runtime.searchTopK),
-    retrieveTopK: await promptNumber(commandContext, "Retrieve top-k", base.runtime.retrieveTopK),
-    maxThreadNum: await promptNumber(commandContext, "Max thread num", base.runtime.maxThreadNum),
-  };
+  if (commandContext.mode !== "tui") {
+    commandContext.ui.notify(
+      "Editing STORM configuration is available only in TUI. Showing current configuration (read-only).",
+      "warning",
+    );
+    commandContext.ui.notify(formatReadOnlySummary(current), "info");
+    return { readOnly: true, config: current };
+  }
 
-  const stageFlags = {
-    doResearch: await promptToggle(commandContext, "Enable research stage", base.stageFlags.doResearch),
-    doGenerateOutline: await promptToggle(commandContext, "Enable outline stage", base.stageFlags.doGenerateOutline),
-    doGenerateArticle: await promptToggle(commandContext, "Enable article stage", base.stageFlags.doGenerateArticle),
-    doPolishArticle: await promptToggle(commandContext, "Enable polish stage", base.stageFlags.doPolishArticle),
-  };
+  const editor = options.editor ?? showConfigEditor;
+  const result = await editor(commandContext, { draft, defaults, env: process.env });
 
-  const lmModels = await promptStormLmModels(commandContext, base.lmModels);
+  if (result.action === "save") {
+    const payload = toSavePayload(result.draft);
+    // Persist the full payload (known fields + any preserved unknown keys) without
+    // dropping unknown keys, so a round-trip never silently deletes data the
+    // editor does not understand.
+    const saved = await saveStormConfigRaw(payload, agentDir);
+    commandContext.ui.notify("Saved /storm-config", "info");
+    return saved;
+  }
 
-  const retriever = await promptStormRetriever(commandContext, base.retriever);
-
-  const saved = await saveStormConfig({ lmModels, retriever, stageFlags, runtime }, agentDir);
-  commandContext.ui.notify("Saved /storm-config", "info");
-  return saved;
+  return null;
 }
 
 export default runStormConfigCommand;

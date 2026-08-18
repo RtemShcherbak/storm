@@ -99,13 +99,18 @@ function toStoredConfig(config) {
   };
 }
 
-export async function loadStormConfig(agentDir = getStormAgentDir()) {
+export async function readStormConfigRaw(agentDir = getStormAgentDir()) {
   try {
     const raw = JSON.parse(await readFile(getStormConfigPath(agentDir), "utf8"));
-    return normalizeStormConfig(raw);
+    return raw && typeof raw === "object" ? raw : null;
   } catch {
-    return defaultStormConfig();
+    return null;
   }
+}
+
+export async function loadStormConfig(agentDir = getStormAgentDir()) {
+  const raw = await readStormConfigRaw(agentDir);
+  return normalizeStormConfig(raw ?? {});
 }
 
 export async function saveStormConfig(config, agentDir = getStormAgentDir()) {
@@ -114,4 +119,11 @@ export async function saveStormConfig(config, agentDir = getStormAgentDir()) {
   await mkdir(dirname(path), { recursive: true });
   await writeFile(path, `${JSON.stringify(stored, null, 2)}\n`, "utf8");
   return stored;
+}
+
+export async function saveStormConfigRaw(config, agentDir = getStormAgentDir()) {
+  const path = getStormConfigPath(agentDir);
+  await mkdir(dirname(path), { recursive: true });
+  await writeFile(path, `${JSON.stringify(config, null, 2)}\n`, "utf8");
+  return config;
 }
