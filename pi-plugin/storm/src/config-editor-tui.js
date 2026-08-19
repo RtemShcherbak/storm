@@ -13,75 +13,18 @@ import {
 import { buildEditorItems, RUNTIME_NUMERIC, RUNTIME_TEXT } from "./config-editor-items.js";
 import { STORM_LM_ROLES, stormModelRoleLabel } from "./models.js";
 import { getSettingsListTheme } from "@earendil-works/pi-coding-agent";
-import { Container, SelectList, SettingsList, Text } from "@earendil-works/pi-tui";
+import { Container, Input, SelectList, SettingsList, Text } from "@earendil-works/pi-tui";
 
 export { buildEditorItems } from "./config-editor-items.js";
 export const MODEL_PICKER_CLEAR = "__storm_clear__";
 
 /**
- * Open a single-select picker as its own top-level `ctx.ui.custom` — never
- * nested inside another custom component (RLM pattern: model picking happens
- * before the settings panel, never from within its onChange).
- * Resolves to the selected value, or `null` on cancel/esc.
- */
-async function openSelectList(ctx, title, items, currentValue) {
-  if (ctx.mode !== "tui" && typeof ctx.ui?.custom !== "function") return null;
-  const values = items.map((item) => item.value);
-  return await ctx.ui.custom((_tui, theme, _kb, done) => {
-    const container = new Container();
-    container.addChild(new Text(theme.fg("accent", theme.bold(title)), 1, 1));
-    const list = new SelectList(items, Math.min(items.length, 13), {
-      selectedPrefix: (t) => theme.fg("accent", t),
-      selectedText: (t) => theme.fg("accent", t),
-      description: (t) => theme.fg("muted", t),
-      noMatch: (t) => theme.fg("warning", t),
-    });
-    const idx = values.indexOf(currentValue ?? "");
-    if (idx >= 0) list.setSelectedIndex(idx);
-    list.onSelect = (item) => done(item.value);
-    list.onCancel = () => done(null);
-    container.addChild(list);
-    container.addChild(new Text(theme.fg("dim", "↑↓ navigate · enter select · esc cancel"), 1, 0));
-    return { render: (w) => container.render(w), invalidate: () => container.invalidate(), handleInput: (data) => list.handleInput(data) };
-  });
-}
-
-async function openModelPicker(ctx, role, currentRef) {
-  if (ctx.mode !== "tui" && typeof ctx.ui?.custom !== "function") return null;
-  try {
-    await ctx.modelRegistry?.refresh?.();
-  } catch {
-    // Fail-soft: use the cached available snapshot if refresh fails.
-  }
-  const models = await (ctx.modelRegistry?.getAvailable?.() ?? []);
-  const refs = models.map((m) => `${m.provider}/${m.id}`).sort((a, b) => a.localeCompare(b));
-  const items = [
-    { value: MODEL_PICKER_CLEAR, label: "Clear selection (unset)" },
-    ...refs.map((r) => ({ value: r, label: r })),
-  ];
-  return openSelectList(ctx, `Pick model for ${stormModelRoleLabel(role)}`, items, currentRef);
-}
-
-async function openRetrieverPicker(ctx, currentBackend) {
-  if (ctx.mode !== "tui" && typeof ctx.ui?.custom !== "function") return null;
-  const defs = listStormRetrievers();
-  const items = [
-    { value: MODEL_PICKER_CLEAR, label: "Clear selection (unset)" },
-    ...defs.map((d) => ({ value: d.id, label: d.label })),
-  ];
-  return openSelectList(ctx, "Choose retriever backend", items, currentBackend);
-}
-
-/**
  * Show the interactive TUI config editor.
  *
- * Follows the RLM pattern: the settings panel is one `ctx.ui.custom` whose
- * `done(result)` resolves the returned promise. Fields that need their own
- * picker/editor are handled by closing the panel with `{ action: "edit", id }`
- * and running that picker as a SEPARATE top-level `ctx.ui.custom` — never
- * nested inside the panel's custom component (nested custom breaks Pi's
- * showExtensionCustom, which only attaches the component after the factory
- * resolves).
+ * Every editable row carries a SettingsList `submenu` — a native feature that
+ * renders a child component inline and, on `done(value)`, fires onChange. No
+ * nested ctx.ui.custom calls (which break Pi's showExtensionCustom), no
+ * close/reopen loop. Stage rows cycle on/off via `values`.
  *
  * Resolves to { action: "save" | "cancel", draft }.
  */
@@ -89,88 +32,157 @@ export async function showConfigEditor(ctx, { draft, defaults, env = process.env
   if (ctx.mode !== "tui" && typeof ctx.ui?.custom !== "function") {
     return { action: "cancel", draft };
   }
+
   let edited = draft;
   let errorMessage = null;
+  let modelOptions = [];
+  let retrieverOptions = [];
 
-  function buildItems() {
-    return buildEditorItems(edited, { env, errorMessage });
+  async function refreshModelOptions() {
+    try {
+      await ctx.modelRegistry?.refresh?.();
+    } catch {
+      // fail-soft
+    }
+    const models = await (ctx.modelRegistry?.getAvailable?.() ?? []);
+    modelOptions = [
+      { value: MODEL_PICKER_CLEAR, label: "Clear selection (unset)" },
+      ...models.map((m) => `${m.provider}/${m.id}`).sort((a, b) => a.localeCompare(b))
+        .map((r) => ({ value: r, label: r })),
+    ];
   }
 
-  // Main loop: keep re-opening the panel until the user saves or cancels.
-  while (true) {
-    const result = await ctx.ui.custom((_tui, theme, _kb, done) => {
-      const container = new Container();
-      container.addChild(new Text(theme.fg("accent", theme.bold("STORM configuration")), 1, 1));
-      const list = new SettingsList(
-        buildItems(),
-        buildItems().length + 2,
-        getSettingsListTheme(),
-        (id, value) => {
-          if (id === "__save__") { done({ action: "save", draft: edited }); return; }
-          if (id === "__cancel__") { done({ action: "cancel", draft: edited }); return; }
-          if (id === "__reset__") {
-            edited = resetDraftToDefaults(edited, defaults);
-            errorMessage = null;
-            return;
-          }
-          if (id.startsWith("stage.")) {
-            // Pure toggle — apply inline and keep the panel open (RLM pattern).
-            edited = toggleStage(edited, id.slice("stage.".length));
-            return;
-          }
-          // Everything else: close the panel and let the caller run a dedicated
-          // top-level picker/editor for the selected field.
-          done({ action: "edit", id, value });
-        },
-        () => done({ action: "cancel", draft: edited }),
-      );
-      container.addChild(list);
-      container.addChild(new Text(theme.fg("dim", "↑↓ move · enter change · esc cancel"), 1, 1));
-      return {
-        render: (w) => container.render(w),
-        invalidate: () => container.invalidate(),
-        handleInput: (data) => list.handleInput?.(data),
-      };
-    });
+  async function refreshRetrieverOptions() {
+    const defs = listStormRetrievers();
+    retrieverOptions = [
+      { value: MODEL_PICKER_CLEAR, label: "Clear selection (unset)" },
+      ...defs.map((d) => ({ value: d.id, label: d.label })),
+    ];
+  }
 
-    if (result.action !== "edit") {
-      return result;
-    }
-
-    // Run the selected field's picker/editor as a separate top-level UI call.
-    const { id } = result;
+  function applyChange(id, value) {
     if (id.startsWith("model.")) {
       const role = id.slice("model.".length);
-      const choice = await openModelPicker(ctx, role, edited.lmModels[role]);
-      if (choice === MODEL_PICKER_CLEAR) edited = clearModel(edited, role);
-      else if (typeof choice === "string") edited = setModel(edited, role, choice);
+      edited = value === MODEL_PICKER_CLEAR ? clearModel(edited, role) : setModel(edited, role, value);
     } else if (id === "retriever.backend") {
-      const choice = await openRetrieverPicker(ctx, edited.retriever.backend);
-      if (choice === MODEL_PICKER_CLEAR) edited = clearRetriever(edited);
-      else if (typeof choice === "string") edited = setRetrieverBackend(edited, choice);
+      edited = value === MODEL_PICKER_CLEAR ? clearRetriever(edited) : setRetrieverBackend(edited, value);
     } else if (id.startsWith("retriever.setting.")) {
       const key = id.slice("retriever.setting.".length);
-      const value = await ctx.ui.input(`Retriever ${key}`, edited.retriever.settings[key] ?? "");
       edited = setRetrieverSetting(edited, key, typeof value === "string" ? value.trim() : "");
     } else if (id.startsWith("runtime.text.")) {
       const field = id.slice("runtime.text.".length);
-      const label = RUNTIME_TEXT.find(([f]) => f === field)?.[1] ?? field;
-      const value = await ctx.ui.input(label, edited.runtime[field] ?? "");
       const res = setRuntimeText(edited, field, value);
       errorMessage = res.error ?? null;
       if (res.draft) edited = res.draft;
     } else if (id.startsWith("runtime.num.")) {
       const field = id.slice("runtime.num.".length);
-      const label = RUNTIME_NUMERIC.find(([f]) => f === field)?.[1] ?? field;
-      const value = await ctx.ui.input(label, String(edited.runtime[field] ?? ""));
       const parsed = Number.parseInt(value, 10);
       const res = setRuntimeNumber(edited, field, parsed);
       errorMessage = res.error ?? null;
       if (res.draft) edited = res.draft;
     }
-    // Loop back and re-open the panel with the updated draft.
   }
-}
 
-// Re-export for callers that want the role list.
-export { STORM_LM_ROLES, stormModelRoleLabel };
+  await Promise.all([refreshModelOptions(), refreshRetrieverOptions()]);
+
+  return ctx.ui.custom((_tui, theme, _kb, done) => {
+    // Native SettingsList submenu → Component. SelectList for single-select rows,
+    // Input for free-text rows.
+    const buildSelectSubmenu = (title, items, currentValue, doneSub) => {
+      const container = new Container();
+      container.addChild(new Text(theme.fg("accent", theme.bold(title)), 1, 1));
+      const list = new SelectList(items, Math.min(items.length, 13), {
+        selectedPrefix: (t) => theme.fg("accent", t),
+        selectedText: (t) => theme.fg("accent", t),
+        description: (t) => theme.fg("muted", t),
+        noMatch: (t) => theme.fg("warning", t),
+      });
+      const values = items.map((item) => item.value);
+      const idx = values.indexOf(currentValue ?? "");
+      if (idx >= 0) list.setSelectedIndex(idx);
+      list.onSelect = (item) => doneSub(item.value);
+      list.onCancel = () => doneSub(undefined);
+      container.addChild(list);
+      container.addChild(new Text(theme.fg("dim", "↑↓ navigate · enter select · esc cancel"), 1, 0));
+      return { render: (w) => container.render(w), invalidate: () => container.invalidate(), handleInput: (data) => list.handleInput(data) };
+    };
+
+    const buildInputSubmenu = (label, initialValue, doneSub) => {
+      const input = new Input();
+      input.setValue(initialValue ?? "");
+      input.onSubmit = (value) => doneSub(value);
+      input.onEscape = () => doneSub(undefined);
+      const container = new Container();
+      container.addChild(new Text(theme.fg("accent", theme.bold(label)), 1, 1));
+      container.addChild(input);
+      container.addChild(new Text(theme.fg("dim", "enter commit · esc cancel"), 1, 0));
+      return { render: (w) => container.render(w), invalidate: () => container.invalidate(), handleInput: (data) => input.handleInput(data) };
+    };
+
+    const itemsWithSubmenus = buildEditorItems(edited, { env, errorMessage }).map((row) => {
+      if (row.id.startsWith("model.")) {
+        const role = row.id.slice("model.".length);
+        return { ...row, submenu: (currentValue, done) => buildSelectSubmenu(
+          `Pick model for ${stormModelRoleLabel(role)}`,
+          modelOptions,
+          currentValue,
+          done,
+        ) };
+      }
+      if (row.id === "retriever.backend") {
+        return { ...row, submenu: (currentValue, done) => buildSelectSubmenu(
+          "Choose retriever backend",
+          retrieverOptions,
+          currentValue,
+          done,
+        ) };
+      }
+      if (row.id.startsWith("retriever.setting.")) {
+        const key = row.id.slice("retriever.setting.".length);
+        return { ...row, submenu: (currentValue, done) => buildInputSubmenu(
+          `Retriever ${key}`, currentValue, done,
+        ) };
+      }
+      if (row.id.startsWith("runtime.text.")) {
+        const field = row.id.slice("runtime.text.".length);
+        const label = RUNTIME_TEXT.find(([f]) => f === field)?.[1] ?? field;
+        return { ...row, submenu: (currentValue, done) => buildInputSubmenu(label, currentValue, done) };
+      }
+      if (row.id.startsWith("runtime.num.")) {
+        const field = row.id.slice("runtime.num.".length);
+        const label = RUNTIME_NUMERIC.find(([f]) => f === field)?.[1] ?? field;
+        return { ...row, submenu: (currentValue, done) => buildInputSubmenu(label, currentValue, done) };
+      }
+      if (row.id.startsWith("stage.")) {
+        return { ...row, values: ["on", "off"] };
+      }
+      return row;
+    });
+
+    const container = new Container();
+    container.addChild(new Text(theme.fg("accent", theme.bold("STORM configuration")), 1, 1));
+    const list = new SettingsList(
+      itemsWithSubmenus,
+      itemsWithSubmenus.length + 2,
+      getSettingsListTheme(),
+      (id, value) => {
+        if (id === "__save__") { done({ action: "save", draft: edited }); return; }
+        if (id === "__cancel__") { done({ action: "cancel", draft: edited }); return; }
+        if (id === "__reset__") {
+          edited = resetDraftToDefaults(edited, defaults);
+          errorMessage = null;
+          return;
+        }
+        applyChange(id, value);
+      },
+      () => done({ action: "cancel", draft: edited }),
+    );
+    container.addChild(list);
+    container.addChild(new Text(theme.fg("dim", "↑↓ move · enter change · esc cancel"), 1, 1));
+    return {
+      render: (w) => container.render(w),
+      invalidate: () => container.invalidate(),
+      handleInput: (data) => list.handleInput?.(data),
+    };
+  });
+}
